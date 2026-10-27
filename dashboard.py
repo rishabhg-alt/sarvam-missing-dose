@@ -74,6 +74,12 @@ class LogCapture:
     def flush(self):
         self.original.flush()
 
+    def isatty(self):
+        return self.original.isatty()
+
+    def __getattr__(self, name):
+        return getattr(self.original, name)
+
 
 sys.stdout = LogCapture(sys.stdout)
 
