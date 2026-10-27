@@ -1,0 +1,548 @@
+"""
+Missed-Dose & Follow-Up Companion — Web Dashboard
+===================================================
+Single-file FastAPI server with embedded HTML dashboard.
+
+Run:
+    python dashboard.py
+
+Open: http://localhost:8000
+
+Features:
+  - Patient list with language, medications, last check-in status
+  - Trigger a check-in for any patient (runs in background)
+  - Live log streaming via SSE while check-in runs
+  - Check-in history per patient with structured report view
+  - Escalation log with all alerts
+  - REST API for all data
+"""
+
+import asyncio
+import json
+import queue
+import sys
+import threading
+from contextlib import asynccontextmanager
+from datetime import datetime
+from pathlib import Path
+from typing import AsyncGenerator
+
+import uvicorn
+from dotenv import load_dotenv
+from fastapi import FastAPI, Request
+from fastapi.responses import HTMLResponse, JSONResponse, StreamingResponse
+
+load_dotenv()
+
+sys.path.insert(0, str(Path(__file__).parent))
+from companion import patient_db
+from companion.storage import init_db, get_checkin_history, get_all_escalations, save_checkin
+
+# ── App init ─────────────────────────────────────────────────────────────────
+
+@asynccontextmanager
+async def lifespan(app: FastAPI):
+    init_db()
+    patient_db.load_patients()
+    yield
+
+app = FastAPI(title="Missed-Dose Companion", lifespan=lifespan)
+
+# ── SSE log bus ───────────────────────────────────────────────────────────────
+
+_log_queues: list[queue.Queue] = []
+
+def broadcast_log(msg: str):
+    for q in list(_log_queues):
+        try:
+            q.put_nowait(msg)
+        except queue.Full:
+            pass
+
+
+class LogCapture:
+    """Captures print() output and broadcasts to SSE clients."""
+    def __init__(self, original):
+        self.original = original
+
+    def write(self, text):
+        self.original.write(text)
+        stripped = text.strip()
+        if stripped:
+            broadcast_log(stripped)
+
+    def flush(self):
+        self.original.flush()
+
+
+sys.stdout = LogCapture(sys.stdout)
+
+# ── Active check-in jobs ──────────────────────────────────────────────────────
+
+_active_jobs: dict[str, str] = {}   # patient_id -> "running" | "done" | "error"
+
+
+def _run_checkin_thread(patient_id: str):
+    """Run a check-in in a background thread so the HTTP response returns immediately."""
+    _active_jobs[patient_id] = "running"
+    try:
+        from companion.call_simulator import simulate_call
+        from companion.storage import save_checkin
+        from companion.escalation import evaluate_and_escalate
+        from companion.notifier import notify
+
+        broadcast_log(f"[{patient_id}] Starting check-in...")
+        report = simulate_call(patient_id)
+
+        if report:
+            patient = patient_db.get_patient(patient_id)
+            triggered = evaluate_and_escalate(patient, report)
+            escalated = bool(triggered)
+            save_checkin(patient, report, escalated=escalated)
+            if triggered:
+                notify(patient, triggered, report)
+            broadcast_log(f"[{patient_id}] ✅ Check-in complete.")
+        else:
+            broadcast_log(f"[{patient_id}] ⚠️ No report extracted.")
+
+        _active_jobs[patient_id] = "done"
+    except Exception as e:
+        broadcast_log(f"[{patient_id}] ❌ Error: {e}")
+        _active_jobs[patient_id] = "error"
+
+
+# ── REST API ──────────────────────────────────────────────────────────────────
+
+@app.get("/api/patients")
+def api_patients():
+    patients = patient_db.get_all_patients()
+    result = []
+    for p in patients:
+        history = get_checkin_history(p["id"])
+        last = history[0] if history else None
+        result.append({
+            **p,
+            "total_checkins": len(history),
+            "last_checkin": last["timestamp"] if last else None,
+            "last_escalated": last["escalated"] if last else False,
+            "job_status": _active_jobs.get(p["id"]),
+        })
+    return result
+
+
+@app.get("/api/patients/{patient_id}/history")
+def api_history(patient_id: str):
+    return get_checkin_history(patient_id)
+
+
+@app.get("/api/escalations")
+def api_escalations():
+    rows = get_all_escalations()
+    result = []
+    for r in rows:
+        result.append({
+            **r,
+            "triggers": json.loads(r["triggers_json"]) if isinstance(r["triggers_json"], str) else r["triggers_json"],
+            "report": json.loads(r["report_json"]) if isinstance(r["report_json"], str) else r["report_json"],
+        })
+    return result
+
+
+@app.post("/api/checkin/{patient_id}")
+def api_trigger_checkin(patient_id: str):
+    patient = patient_db.get_patient(patient_id)
+    if not patient:
+        return JSONResponse({"error": f"Patient {patient_id} not found"}, status_code=404)
+    if _active_jobs.get(patient_id) == "running":
+        return JSONResponse({"error": "Check-in already running for this patient"}, status_code=409)
+    t = threading.Thread(target=_run_checkin_thread, args=(patient_id,), daemon=True)
+    t.start()
+    return {"status": "started", "patient_id": patient_id}
+
+
+@app.get("/api/logs")
+async def api_logs(request: Request) -> StreamingResponse:
+    """SSE endpoint — streams live logs to the browser."""
+    q: queue.Queue = queue.Queue(maxsize=100)
+    _log_queues.append(q)
+
+    async def generator() -> AsyncGenerator[str, None]:
+        try:
+            while True:
+                if await request.is_disconnected():
+                    break
+                try:
+                    msg = q.get_nowait()
+                    yield f"data: {json.dumps(msg)}\n\n"
+                except queue.Empty:
+                    await asyncio.sleep(0.2)
+        finally:
+            _log_queues.remove(q)
+
+    return StreamingResponse(generator(), media_type="text/event-stream",
+                             headers={"Cache-Control": "no-cache", "X-Accel-Buffering": "no"})
+
+
+# ── Dashboard HTML ─────────────────────────────────────────────────────────────
+
+DASHBOARD_HTML = """<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Missed-Dose Companion</title>
+<style>
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+  body { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
+         background: #f5f7fa; color: #1a1a2e; min-height: 100vh; }
+  header { background: #1a1a2e; color: white; padding: 16px 32px;
+           display: flex; align-items: center; gap: 12px; }
+  header h1 { font-size: 1.2rem; font-weight: 600; }
+  header span { font-size: 1.5rem; }
+  .subtitle { font-size: 0.8rem; color: #8888aa; margin-top: 2px; }
+
+  nav { display: flex; gap: 0; background: white; border-bottom: 1px solid #e0e0ef; padding: 0 32px; }
+  nav button { padding: 12px 20px; border: none; background: none; cursor: pointer;
+               font-size: 0.9rem; color: #666; border-bottom: 3px solid transparent;
+               transition: all 0.15s; }
+  nav button.active { color: #1a1a2e; border-bottom-color: #6c63ff; font-weight: 600; }
+  nav button:hover:not(.active) { color: #1a1a2e; background: #f5f7fa; }
+
+  main { padding: 32px; max-width: 1200px; margin: 0 auto; }
+  section { display: none; }
+  section.active { display: block; }
+
+  h2 { font-size: 1.1rem; font-weight: 600; margin-bottom: 20px; color: #1a1a2e; }
+
+  /* Patient grid */
+  .patients-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(340px, 1fr)); gap: 16px; }
+  .patient-card { background: white; border-radius: 12px; padding: 20px;
+                  box-shadow: 0 1px 4px rgba(0,0,0,0.08); border: 1px solid #eee; }
+  .patient-card .name { font-weight: 700; font-size: 1rem; margin-bottom: 4px; }
+  .patient-card .meta { font-size: 0.8rem; color: #888; margin-bottom: 12px; }
+  .badge { display: inline-block; padding: 2px 8px; border-radius: 99px; font-size: 0.72rem;
+           font-weight: 600; margin-right: 4px; }
+  .badge.lang { background: #ede9fe; color: #6c63ff; }
+  .badge.ok { background: #d1fae5; color: #059669; }
+  .badge.alert { background: #fee2e2; color: #dc2626; }
+  .badge.running { background: #fef3c7; color: #d97706; }
+  .meds { font-size: 0.8rem; color: #555; margin: 10px 0; line-height: 1.6; }
+  .meds strong { color: #333; display: block; margin-bottom: 2px; }
+  .last-checkin { font-size: 0.76rem; color: #aaa; margin-top: 10px; }
+  .btn { padding: 8px 16px; border: none; border-radius: 8px; cursor: pointer;
+         font-size: 0.85rem; font-weight: 600; transition: all 0.15s; }
+  .btn-primary { background: #6c63ff; color: white; }
+  .btn-primary:hover { background: #5a52e0; }
+  .btn-primary:disabled { background: #c4c4c4; cursor: not-allowed; }
+  .btn-sm { padding: 5px 12px; font-size: 0.78rem; }
+  .card-footer { display: flex; justify-content: space-between; align-items: center; margin-top: 14px; }
+
+  /* Table */
+  table { width: 100%; border-collapse: collapse; background: white;
+          border-radius: 12px; overflow: hidden; box-shadow: 0 1px 4px rgba(0,0,0,0.08); }
+  th { text-align: left; padding: 12px 16px; font-size: 0.78rem; font-weight: 600;
+       color: #888; background: #fafafa; border-bottom: 1px solid #eee; text-transform: uppercase; letter-spacing: 0.05em; }
+  td { padding: 12px 16px; font-size: 0.85rem; border-bottom: 1px solid #f0f0f0; vertical-align: top; }
+  tr:last-child td { border-bottom: none; }
+  tr:hover td { background: #fafbff; }
+
+  /* Log console */
+  #log-console { background: #1a1a2e; color: #a8ff78; font-family: 'SF Mono', 'Fira Code', monospace;
+                 font-size: 0.8rem; padding: 20px; border-radius: 12px; height: 400px;
+                 overflow-y: auto; line-height: 1.8; white-space: pre-wrap; }
+  #log-console .log-line { animation: fadein 0.2s ease; }
+  @keyframes fadein { from { opacity: 0; transform: translateY(4px); } to { opacity: 1; } }
+
+  /* Report modal */
+  .modal-overlay { display: none; position: fixed; inset: 0; background: rgba(0,0,0,0.5);
+                   z-index: 100; align-items: center; justify-content: center; }
+  .modal-overlay.open { display: flex; }
+  .modal { background: white; border-radius: 16px; padding: 28px; max-width: 600px;
+           width: 90%; max-height: 80vh; overflow-y: auto; position: relative; }
+  .modal h3 { font-size: 1rem; font-weight: 700; margin-bottom: 16px; }
+  .modal-close { position: absolute; top: 16px; right: 16px; border: none; background: none;
+                 font-size: 1.2rem; cursor: pointer; color: #888; }
+  .report-section { margin-bottom: 16px; }
+  .report-section label { font-size: 0.75rem; font-weight: 700; color: #888;
+                          text-transform: uppercase; letter-spacing: 0.05em; display: block; margin-bottom: 6px; }
+  .med-row { display: flex; justify-content: space-between; padding: 6px 10px;
+             border-radius: 6px; background: #f5f7fa; margin-bottom: 4px; font-size: 0.84rem; }
+  .med-status.taken { color: #059669; font-weight: 600; }
+  .med-status.missed { color: #dc2626; font-weight: 600; }
+  .med-status.partial { color: #d97706; font-weight: 600; }
+  .med-status.unknown { color: #888; }
+  .flag-list { display: flex; flex-wrap: wrap; gap: 6px; }
+  .symptom-tag { background: #fee2e2; color: #dc2626; border-radius: 99px;
+                 padding: 2px 10px; font-size: 0.78rem; }
+  .summary-box { background: #f0f4ff; border-radius: 8px; padding: 12px;
+                 font-size: 0.85rem; color: #444; line-height: 1.5; }
+
+  .empty { color: #aaa; font-size: 0.85rem; padding: 40px; text-align: center; }
+  .stats-row { display: flex; gap: 16px; margin-bottom: 24px; }
+  .stat-card { background: white; border-radius: 12px; padding: 16px 24px;
+               flex: 1; box-shadow: 0 1px 4px rgba(0,0,0,0.08); }
+  .stat-card .num { font-size: 2rem; font-weight: 700; color: #6c63ff; }
+  .stat-card .lbl { font-size: 0.8rem; color: #888; margin-top: 2px; }
+</style>
+</head>
+<body>
+
+<header>
+  <span>🏥</span>
+  <div>
+    <h1>Missed-Dose & Follow-Up Companion</h1>
+    <div class="subtitle">Automated outbound voice check-ins · Sarvam AI</div>
+  </div>
+</header>
+
+<nav>
+  <button class="active" onclick="showTab('patients')">👥 Patients</button>
+  <button onclick="showTab('escalations')">🚨 Escalations</button>
+  <button onclick="showTab('logs')">🖥 Live Logs</button>
+</nav>
+
+<main>
+
+  <!-- Patients tab -->
+  <section id="tab-patients" class="active">
+    <div class="stats-row" id="stats-row"></div>
+    <h2>Patient Registry</h2>
+    <div class="patients-grid" id="patient-grid">
+      <div class="empty">Loading patients…</div>
+    </div>
+  </section>
+
+  <!-- Escalations tab -->
+  <section id="tab-escalations">
+    <h2>Escalation Log</h2>
+    <table>
+      <thead>
+        <tr>
+          <th>Time</th><th>Patient</th><th>Triggers</th><th>Coordinator</th><th>Summary</th><th></th>
+        </tr>
+      </thead>
+      <tbody id="escalation-tbody">
+        <tr><td colspan="6" class="empty">Loading…</td></tr>
+      </tbody>
+    </table>
+  </section>
+
+  <!-- Logs tab -->
+  <section id="tab-logs">
+    <h2>Live Check-In Logs</h2>
+    <div id="log-console">Waiting for activity…</div>
+  </section>
+
+</main>
+
+<!-- Report modal -->
+<div class="modal-overlay" id="modal-overlay" onclick="closeModal(event)">
+  <div class="modal" id="modal-content">
+    <button class="modal-close" onclick="closeModal()">✕</button>
+    <div id="modal-body"></div>
+  </div>
+</div>
+
+<script>
+const LANG_NAMES = {
+  'hi-IN':'Hindi','ta-IN':'Tamil','te-IN':'Telugu','bn-IN':'Bengali',
+  'mr-IN':'Marathi','gu-IN':'Gujarati','kn-IN':'Kannada','ml-IN':'Malayalam',
+  'pa-IN':'Punjabi','en-IN':'English'
+};
+
+let patients = [];
+let escalations = [];
+
+// ── Tab switching ────────────────────────────────────────────────────────────
+function showTab(name) {
+  document.querySelectorAll('section').forEach(s => s.classList.remove('active'));
+  document.querySelectorAll('nav button').forEach(b => b.classList.remove('active'));
+  document.getElementById('tab-' + name).classList.add('active');
+  event.target.classList.add('active');
+  if (name === 'escalations') loadEscalations();
+}
+
+// ── Patients ─────────────────────────────────────────────────────────────────
+async function loadPatients() {
+  const res = await fetch('/api/patients');
+  patients = await res.json();
+  renderStats();
+  renderPatients();
+}
+
+function renderStats() {
+  const total = patients.length;
+  const escalated = patients.filter(p => p.last_escalated).length;
+  const checkedIn = patients.filter(p => p.total_checkins > 0).length;
+  document.getElementById('stats-row').innerHTML = `
+    <div class="stat-card"><div class="num">${total}</div><div class="lbl">Total Patients</div></div>
+    <div class="stat-card"><div class="num">${checkedIn}</div><div class="lbl">Checked In</div></div>
+    <div class="stat-card"><div class="num" style="color:#dc2626">${escalated}</div><div class="lbl">Escalated (last call)</div></div>
+  `;
+}
+
+function renderPatients() {
+  const grid = document.getElementById('patient-grid');
+  if (!patients.length) { grid.innerHTML = '<div class="empty">No patients found</div>'; return; }
+  grid.innerHTML = patients.map(p => {
+    const lang = LANG_NAMES[p.language] || p.language;
+    const lastTime = p.last_checkin ? new Date(p.last_checkin).toLocaleString('en-IN') : 'Never';
+    const statusBadge = p.job_status === 'running'
+      ? '<span class="badge running">⏳ Running</span>'
+      : p.last_escalated
+        ? '<span class="badge alert">🚨 Escalated</span>'
+        : p.total_checkins > 0
+          ? '<span class="badge ok">✅ OK</span>'
+          : '';
+    const meds = p.medications.map(m => `<span>💊 ${m}</span>`).join('<br>');
+    const btnDisabled = p.job_status === 'running' ? 'disabled' : '';
+    return `
+    <div class="patient-card" id="card-${p.id}">
+      <div class="name">${p.name}</div>
+      <div class="meta">
+        <span class="badge lang">${lang}</span>
+        ${statusBadge}
+      </div>
+      <div class="meds"><strong>Medications</strong>${meds}</div>
+      <div class="meds"><strong>Next Appointment</strong>${p.next_appointment}</div>
+      <div class="last-checkin">Last check-in: ${lastTime} · ${p.total_checkins} total</div>
+      <div class="card-footer">
+        <button class="btn btn-primary btn-sm" id="btn-${p.id}" onclick="triggerCheckin('${p.id}')" ${btnDisabled}>
+          📞 Check In
+        </button>
+        ${p.total_checkins > 0 ? `<button class="btn btn-sm" style="background:#f0f4ff;color:#6c63ff" onclick="showHistory('${p.id}')">📋 History</button>` : ''}
+      </div>
+    </div>`;
+  }).join('');
+}
+
+async function triggerCheckin(patientId) {
+  const btn = document.getElementById('btn-' + patientId);
+  btn.disabled = true;
+  btn.textContent = '⏳ Running…';
+
+  // Switch to logs tab to show live output
+  document.querySelectorAll('section').forEach(s => s.classList.remove('active'));
+  document.querySelectorAll('nav button').forEach(b => b.classList.remove('active'));
+  document.getElementById('tab-logs').classList.add('active');
+  document.querySelectorAll('nav button')[2].classList.add('active');
+
+  await fetch('/api/checkin/' + patientId, { method: 'POST' });
+
+  // Poll for completion
+  const poll = setInterval(async () => {
+    await loadPatients();
+    const p = patients.find(x => x.id === patientId);
+    if (p && p.job_status !== 'running') {
+      clearInterval(poll);
+    }
+  }, 3000);
+}
+
+// ── History modal ─────────────────────────────────────────────────────────────
+async function showHistory(patientId) {
+  const res = await fetch('/api/patients/' + patientId + '/history');
+  const history = await res.json();
+  const patient = patients.find(p => p.id === patientId);
+  if (!history.length) { alert('No check-in history yet.'); return; }
+  const latest = history[0];
+  renderModal(patient, latest);
+}
+
+function renderModal(patient, checkin) {
+  const r = checkin.report;
+  const meds = Object.entries(r.medication_adherence || {}).map(([med, status]) =>
+    `<div class="med-row"><span>${med}</span><span class="med-status ${status}">${status.toUpperCase()}</span></div>`
+  ).join('');
+  const symptoms = (r.symptoms_reported || []).length
+    ? r.symptoms_reported.map(s => `<span class="symptom-tag">${s}</span>`).join('')
+    : '<span style="color:#aaa;font-size:0.85rem">None reported</span>';
+  const flags = Object.entries(r.escalation_flags || {})
+    .filter(([,v]) => v)
+    .map(([k]) => `<span class="badge alert">${k.replace(/_/g,' ')}</span>`)
+    .join('') || '<span style="color:#aaa;font-size:0.85rem">None</span>';
+
+  document.getElementById('modal-body').innerHTML = `
+    <h3>📋 Check-In Report — ${patient.name}</h3>
+    <div style="font-size:0.78rem;color:#aaa;margin-bottom:16px">${new Date(checkin.timestamp).toLocaleString('en-IN')}</div>
+    <div class="report-section"><label>Medication Adherence</label>${meds}</div>
+    <div class="report-section"><label>Symptoms Reported</label><div class="flag-list">${symptoms}</div></div>
+    <div class="report-section"><label>Appointment Confirmed</label>
+      <span class="badge ${r.appointment_confirmed ? 'ok' : 'alert'}">${r.appointment_confirmed ? 'Yes' : 'No / Unknown'}</span>
+    </div>
+    <div class="report-section"><label>Escalation Flags</label><div class="flag-list">${flags}</div></div>
+    <div class="report-section"><label>Summary</label><div class="summary-box">${r.summary || '—'}</div></div>
+  `;
+  document.getElementById('modal-overlay').classList.add('open');
+}
+
+function closeModal(e) {
+  if (!e || e.target === document.getElementById('modal-overlay')) {
+    document.getElementById('modal-overlay').classList.remove('open');
+  }
+}
+
+// ── Escalations ───────────────────────────────────────────────────────────────
+async function loadEscalations() {
+  const res = await fetch('/api/escalations');
+  escalations = await res.json();
+  const tbody = document.getElementById('escalation-tbody');
+  if (!escalations.length) {
+    tbody.innerHTML = '<tr><td colspan="6" class="empty">No escalations yet — that\'s good! 🎉</td></tr>';
+    return;
+  }
+  tbody.innerHTML = escalations.map(e => {
+    const triggers = (Array.isArray(e.triggers) ? e.triggers : JSON.parse(e.triggers || '[]'))
+      .map(t => `<span class="badge alert">${t.replace(/_/g,' ')}</span>`).join(' ');
+    const report = typeof e.report === 'string' ? JSON.parse(e.report) : e.report;
+    return `<tr>
+      <td style="white-space:nowrap;color:#888">${new Date(e.timestamp).toLocaleString('en-IN')}</td>
+      <td><strong>${e.patient_name}</strong><br><span style="font-size:0.76rem;color:#aaa">${e.patient_id}</span></td>
+      <td>${triggers}</td>
+      <td style="font-size:0.8rem">${e.coordinator_email}<br>${e.coordinator_phone}</td>
+      <td style="font-size:0.82rem;color:#555;max-width:220px">${report.summary || '—'}</td>
+      <td><button class="btn btn-sm" style="background:#f0f4ff;color:#6c63ff"
+          onclick='showEscalationDetail(${JSON.stringify(JSON.stringify(e))})'>View</button></td>
+    </tr>`;
+  }).join('');
+}
+
+function showEscalationDetail(eJson) {
+  const e = JSON.parse(eJson);
+  const report = typeof e.report === 'string' ? JSON.parse(e.report) : e.report;
+  const patient = { id: e.patient_id, name: e.patient_name };
+  renderModal(patient, { report, timestamp: e.timestamp });
+}
+
+// ── Live logs SSE ──────────────────────────────────────────────────────────────
+const logConsole = document.getElementById('log-console');
+const evtSource = new EventSource('/api/logs');
+evtSource.onmessage = (e) => {
+  const line = document.createElement('div');
+  line.className = 'log-line';
+  line.textContent = JSON.parse(e.data);
+  logConsole.appendChild(line);
+  logConsole.scrollTop = logConsole.scrollHeight;
+  // Keep last 300 lines
+  while (logConsole.children.length > 300) logConsole.removeChild(logConsole.firstChild);
+};
+
+// ── Init & auto-refresh ────────────────────────────────────────────────────────
+loadPatients();
+setInterval(loadPatients, 10000);   // refresh patient cards every 10s
+</script>
+</body>
+</html>
+"""
+
+
+@app.get("/", response_class=HTMLResponse)
+async def dashboard():
+    return HTMLResponse(DASHBOARD_HTML)
+
+
+if __name__ == "__main__":
+    print("🏥 Missed-Dose Companion Dashboard")
+    print("   http://localhost:8000")
+    print("   Press Ctrl+C to stop\n")
+    uvicorn.run(app, host="0.0.0.0", port=8000, log_level="warning")
