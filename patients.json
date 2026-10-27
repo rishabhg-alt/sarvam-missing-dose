@@ -1,0 +1,35 @@
+[
+  {
+    "id": "P001",
+    "name": "Ramesh Kumar",
+    "phone": "+919876543210",
+    "language": "hi-IN",
+    "discharge_date": "2026-10-20",
+    "medications": ["Metformin 500mg twice daily", "Amlodipine 5mg once daily"],
+    "next_appointment": "2026-11-05",
+    "coordinator_phone": "+911234567890",
+    "coordinator_email": "dr.sharma@clinic.com"
+  },
+  {
+    "id": "P002",
+    "name": "Lakshmi Devi",
+    "phone": "+919812345678",
+    "language": "ta-IN",
+    "discharge_date": "2026-10-22",
+    "medications": ["Atorvastatin 10mg once daily", "Losartan 50mg twice daily"],
+    "next_appointment": "2026-11-10",
+    "coordinator_phone": "+911234567890",
+    "coordinator_email": "dr.sharma@clinic.com"
+  },
+  {
+    "id": "P003",
+    "name": "Suresh Patel",
+    "phone": "+919898765432",
+    "language": "gu-IN",
+    "discharge_date": "2026-10-23",
+    "medications": ["Aspirin 75mg once daily"],
+    "next_appointment": "2026-11-08",
+    "coordinator_phone": "+911234567890",
+    "coordinator_email": "dr.sharma@clinic.com"
+  }
+]

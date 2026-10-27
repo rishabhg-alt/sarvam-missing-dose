@@ -1,0 +1,11 @@
+.env
+__pycache__/
+*.pyc
+*.pyo
+*.pyd
+.Python
+*.db
+escalation_log.json
+scheduler.log
+/tmp/sarvam_tts_*.wav
+.DS_Store
