@@ -13,8 +13,8 @@ LANGUAGE_NAMES = {
     "en-IN": "English",
 }
 
-# Language -> Bulbul speaker for Agent (calm, warm tone compatible with bulbul:v3)
-VOICE_MAP = {
+# Language -> Female Bulbul speakers for Agent & Female Patients
+VOICE_MAP_FEMALE = {
     "hi-IN": "ritu",
     "ta-IN": "kavitha",
     "te-IN": "kavitha",
@@ -27,8 +27,8 @@ VOICE_MAP = {
     "en-IN": "ishita",
 }
 
-# Language -> Bulbul speaker for Patient (distinct tone compatible with bulbul:v3)
-PATIENT_VOICE_MAP = {
+# Language -> Male Bulbul speakers for Male Patients & Male Agents
+VOICE_MAP_MALE = {
     "hi-IN": "shubh",
     "ta-IN": "vijay",
     "te-IN": "vijay",
@@ -40,6 +40,22 @@ PATIENT_VOICE_MAP = {
     "pa-IN": "kabir",
     "en-IN": "aditya",
 }
+
+# Backward-compatibility aliases
+VOICE_MAP = VOICE_MAP_FEMALE
+PATIENT_VOICE_MAP = VOICE_MAP_MALE
+
+def get_speaker_for_patient(patient: dict) -> str:
+    """Return gender-matching voice for patient."""
+    lang = patient.get("language", "hi-IN")
+    gender = str(patient.get("gender", "male")).lower()
+    if gender == "female":
+        return VOICE_MAP_FEMALE.get(lang, "kavitha")
+    return VOICE_MAP_MALE.get(lang, "shubh")
+
+def get_speaker_for_agent(lang: str) -> str:
+    """Clinic assistant uses a warm, empathetic female voice."""
+    return VOICE_MAP_FEMALE.get(lang, "ritu")
 
 TTS_MODEL = "bulbul:v3"
 STT_MODEL = "saaras:v2"

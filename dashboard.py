@@ -146,7 +146,7 @@ def _run_checkin_thread(patient_id: str):
     _active_jobs[patient_id] = "running"
     try:
         from companion import conversation, patient_db, escalation, notifier, tts
-        from companion.config import VOICE_MAP, PATIENT_VOICE_MAP
+        from companion.config import get_speaker_for_patient, get_speaker_for_agent
         from companion.storage import save_checkin
 
         patient = patient_db.get_patient(patient_id)
@@ -156,14 +156,19 @@ def _run_checkin_thread(patient_id: str):
             return
 
         lang = patient["language"]
+        pat_gender = patient.get("gender", "male")
+        agent_speaker = get_speaker_for_agent(lang)
+        patient_speaker = get_speaker_for_patient(patient)
+
         broadcast_event({
             "type": "call_start",
             "patient_id": patient_id,
             "patient_name": patient["name"],
             "phone": patient["phone"],
+            "gender": pat_gender,
             "language": lang
         })
-        broadcast_log(f"📞 CALL CONNECTED: {patient['name']} ({patient['phone']}) in {lang}")
+        broadcast_log(f"📞 CALL CONNECTED: {patient['name']} ({patient['phone']}) in {lang} [Agent:{agent_speaker}, Patient:{patient_speaker}]")
 
         report = None
         turn_num = 0
@@ -173,23 +178,25 @@ def _run_checkin_thread(patient_id: str):
                 turn_num += 1
                 role = "agent" if item_type == "agent" else "patient"
                 spk = "AI Clinic Assistant" if role == "agent" else patient["name"]
+                spk_voice = agent_speaker if role == "agent" else patient_speaker
+                turn_gender = "female" if role == "agent" else pat_gender
 
                 # Pre-synthesize TTS audio directly into cache BEFORE broadcasting turn.
-                # This ensures the browser's audio request hits a 0ms memory cache instead of waiting for API.
-                cache_key = f"{role}:{lang}:{content}"
+                cache_key = f"{spk_voice}:{lang}:{content}"
                 if cache_key not in _audio_cache:
                     try:
-                        speaker = VOICE_MAP.get(lang, "ritu") if role == "agent" else PATIENT_VOICE_MAP.get(lang, "shubh")
-                        audio_data = tts.speak(content, lang, speaker=speaker)
+                        audio_data = tts.speak(content, lang, speaker=spk_voice)
                         if audio_data:
                             _audio_cache[cache_key] = audio_data
                     except Exception as err:
-                        print(f"Pre-warm TTS error: {err}")
+                        print(f"Pre-warm TTS error ({spk_voice}): {err}")
 
                 broadcast_event({
                     "type": "turn",
                     "role": role,
                     "speaker": spk,
+                    "speaker_voice": spk_voice,
+                    "gender": turn_gender,
                     "text": content,
                     "lang": lang,
                     "turn": turn_num
@@ -269,17 +276,24 @@ def api_trigger_checkin(patient_id: str):
 
 
 @app.get("/api/speak")
-def api_speak(text: str, lang: str = "hi-IN", role: str = "agent"):
+def api_speak(text: str, lang: str = "hi-IN", role: str = "agent", gender: str = "male", speaker: str = None):
     """Synthesizes text to speech using Sarvam Bulbul and returns WAV audio (with in-memory cache)."""
     from companion import tts
-    from companion.config import VOICE_MAP, PATIENT_VOICE_MAP
+    from companion.config import get_speaker_for_agent, VOICE_MAP_FEMALE, VOICE_MAP_MALE
     from fastapi.responses import Response
 
-    cache_key = f"{role}:{lang}:{text}"
+    if not speaker:
+        if role == "agent":
+            speaker = get_speaker_for_agent(lang)
+        elif str(gender).lower() == "female":
+            speaker = VOICE_MAP_FEMALE.get(lang, "kavitha")
+        else:
+            speaker = VOICE_MAP_MALE.get(lang, "shubh")
+
+    cache_key = f"{speaker}:{lang}:{text}"
     if cache_key in _audio_cache:
         return Response(content=_audio_cache[cache_key], media_type="audio/wav")
 
-    speaker = VOICE_MAP.get(lang, "ritu") if role == "agent" else PATIENT_VOICE_MAP.get(lang, "shubh")
     try:
         audio = tts.speak(text, lang, speaker=speaker)
         _audio_cache[cache_key] = audio
@@ -728,16 +742,19 @@ function toggleAudio() {
 
   if (cAudio) {
     cAudio.muted = !audioEnabled;
-    cAudio.volume = audioEnabled ? 1 : 0;
-    // If unmuting during active turn, resume playback immediately
-    if (audioEnabled && isPlayingTurn && cAudio.paused) {
+    cAudio.volume = audioEnabled ? 1.0 : 0.0;
+    // If unmuting during active turn, resume playback immediately (rewind if ended while muted)
+    if (audioEnabled && isPlayingTurn) {
+      if (cAudio.ended || cAudio.currentTime >= (cAudio.duration - 0.25) || cAudio.paused) {
+        cAudio.currentTime = (cAudio.ended || cAudio.currentTime >= (cAudio.duration - 0.25)) ? 0 : cAudio.currentTime;
+      }
       cAudio.play().catch(e => console.warn('Unmute resume error:', e));
     }
   }
 
   if (rAudio) {
     rAudio.muted = !audioEnabled;
-    rAudio.volume = audioEnabled ? 1 : 0;
+    rAudio.volume = audioEnabled ? 1.0 : 0.0;
   }
 }
 
@@ -767,8 +784,8 @@ function unlockAudio() {
 }
 
 function enqueueTurn(turn) {
-  // Pre-load audio into browser cache
-  const audioUrl = '/api/speak?role=' + turn.role + '&lang=' + encodeURIComponent(turn.lang) + '&text=' + encodeURIComponent(turn.text);
+  // Pre-load audio into browser cache with exact speaker voice and gender
+  const audioUrl = '/api/speak?role=' + turn.role + '&lang=' + encodeURIComponent(turn.lang) + '&speaker=' + encodeURIComponent(turn.speaker_voice || '') + '&gender=' + encodeURIComponent(turn.gender || 'female') + '&text=' + encodeURIComponent(turn.text);
   const preloaded = new Audio(audioUrl);
   preloaded.preload = "auto";
   preloaded.load();
@@ -779,7 +796,7 @@ function enqueueTurn(turn) {
   }
 }
 
-function createSpeechBubbleSkeleton(role, speaker, lang, fullText) {
+function createSpeechBubbleSkeleton(role, speaker, lang, fullText, speakerVoice, gender) {
   const transcript = document.getElementById('call-transcript');
   if (!transcript) return null;
   const empty = document.getElementById('transcript-empty');
@@ -804,7 +821,7 @@ function createSpeechBubbleSkeleton(role, speaker, lang, fullText) {
   const playBtn = document.createElement('button');
   playBtn.className = 'play-turn-btn';
   playBtn.innerHTML = '🔊 Replay Audio';
-  playBtn.onclick = () => playSingleTurn(role, lang, fullText);
+  playBtn.onclick = () => playSingleTurn(role, lang, fullText, speakerVoice, gender);
   action.appendChild(playBtn);
 
   wrap.appendChild(sender);
@@ -817,12 +834,65 @@ function createSpeechBubbleSkeleton(role, speaker, lang, fullText) {
   return { wrap, card, action };
 }
 
+let pendingCallEnd = null;
+
+function applyCallEnd(data) {
+  const pBadge = document.getElementById('call-status-badge');
+  if (pBadge) {
+    pBadge.textContent = data.escalated ? 'Call Ended · 🚨 Escalated' : 'Call Ended · ✅ Adherent';
+    pBadge.style.color = data.escalated ? '#dc2626' : '#059669';
+  }
+
+  const transcript = document.getElementById('call-transcript');
+  if (transcript && !document.getElementById('call-conclusion-card')) {
+    const summaryCard = document.createElement('div');
+    summaryCard.id = 'call-conclusion-card';
+    summaryCard.style.marginTop = '20px';
+    summaryCard.style.padding = '16px';
+    summaryCard.style.borderRadius = '12px';
+    summaryCard.style.background = data.escalated ? '#fff1f2' : '#f0fdf4';
+    summaryCard.style.border = '2px solid ' + (data.escalated ? '#fca5a5' : '#86efac');
+
+    const heading = document.createElement('div');
+    heading.style.fontWeight = '700';
+    heading.style.fontSize = '0.95rem';
+    heading.style.color = data.escalated ? '#991b1b' : '#166534';
+    heading.style.marginBottom = '6px';
+    heading.textContent = data.escalated ? '🚨 Call Concluded — Escalation Triggered' : '✅ Call Concluded — Routine Follow-Up Complete';
+
+    const summaryText = document.createElement('div');
+    summaryText.style.fontSize = '0.86rem';
+    summaryText.style.color = '#374151';
+    summaryText.style.marginBottom = '12px';
+    summaryText.textContent = data.report ? (data.report.summary || 'Check-in completed successfully.') : 'Check-in completed.';
+
+    const histBtn = document.createElement('button');
+    histBtn.className = 'btn btn-sm btn-primary';
+    histBtn.textContent = '📋 View Full Structured Report';
+    histBtn.onclick = () => showHistory(data.patient_id);
+
+    summaryCard.appendChild(heading);
+    summaryCard.appendChild(summaryText);
+    summaryCard.appendChild(histBtn);
+    transcript.appendChild(summaryCard);
+    window.scrollTo({ top: document.body.scrollHeight, behavior: 'smooth' });
+  }
+
+  loadPatients();
+}
+
 function playNextTurn() {
   if (!turnQueue.length) {
     isPlayingTurn = false;
     currentTurn = null;
     const ind = document.getElementById('audio-playing-indicator');
     if (ind) ind.style.display = 'none';
+
+    // When all speech turns have completely finished, apply pending call conclusion!
+    if (pendingCallEnd) {
+      applyCallEnd(pendingCallEnd);
+      pendingCallEnd = null;
+    }
     return;
   }
 
@@ -830,7 +900,7 @@ function playNextTurn() {
   const turn = turnQueue.shift();
   currentTurn = turn;
 
-  const bubbleElements = createSpeechBubbleSkeleton(turn.role, turn.speaker, turn.lang, turn.text);
+  const bubbleElements = createSpeechBubbleSkeleton(turn.role, turn.speaker, turn.lang, turn.text, turn.speaker_voice, turn.gender);
 
   const ind = document.getElementById('audio-playing-indicator');
   const indText = document.getElementById('audio-speaking-text');
@@ -887,7 +957,7 @@ function playNextTurn() {
   }
 
   const cAudio = getCallAudio();
-  const audioUrl = '/api/speak?role=' + turn.role + '&lang=' + encodeURIComponent(turn.lang) + '&text=' + encodeURIComponent(turn.text);
+  const audioUrl = '/api/speak?role=' + turn.role + '&lang=' + encodeURIComponent(turn.lang) + '&speaker=' + encodeURIComponent(turn.speaker_voice || '') + '&gender=' + encodeURIComponent(turn.gender || 'female') + '&text=' + encodeURIComponent(turn.text);
 
   // Reset listeners
   cAudio.onplaying = null;
@@ -937,7 +1007,7 @@ function playNextTurn() {
   }, 6000);
 }
 
-function playSingleTurn(role, lang, text) {
+function playSingleTurn(role, lang, text, speakerVoice, gender) {
   unlockAudio();
   const rAudio = getReplayAudio();
   if (!rAudio) return;
@@ -953,7 +1023,7 @@ function playSingleTurn(role, lang, text) {
     }
   }
 
-  const audioUrl = '/api/speak?role=' + role + '&lang=' + encodeURIComponent(lang) + '&text=' + encodeURIComponent(text);
+  const audioUrl = '/api/speak?role=' + role + '&lang=' + encodeURIComponent(lang) + '&speaker=' + encodeURIComponent(speakerVoice || '') + '&gender=' + encodeURIComponent(gender || 'female') + '&text=' + encodeURIComponent(text);
   rAudio.muted = !audioEnabled;
   rAudio.volume = audioEnabled ? 1 : 0;
   rAudio.src = audioUrl;
@@ -1104,12 +1174,12 @@ try {
         } else if (parsed.type === 'turn') {
           enqueueTurn(parsed);
         } else if (parsed.type === 'call_end') {
-          const pBadge = document.getElementById('call-status-badge');
-          if (pBadge) {
-            pBadge.textContent = parsed.escalated ? 'Call Ended · 🚨 Escalated' : 'Call Ended · ✅ Adherent';
-            pBadge.style.color = parsed.escalated ? '#dc2626' : '#059669';
+          pendingCallEnd = parsed;
+          // Apply immediately ONLY if no turns are playing or waiting in queue
+          if (!isPlayingTurn && !turnQueue.length) {
+            applyCallEnd(pendingCallEnd);
+            pendingCallEnd = null;
           }
-          loadPatients();
         } else if (parsed.type === 'log') {
           if (logConsole) {
             const line = document.createElement('div');
