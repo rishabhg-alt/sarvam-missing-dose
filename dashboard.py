@@ -965,6 +965,37 @@ DASHBOARD_HTML = """<!DOCTYPE html>
     color: var(--text-muted);
     font-size: 0.9rem;
   }
+
+  /* ── Floating Jump to Bottom Pill ── */
+  .scroll-bottom-pill {
+    position: fixed;
+    bottom: 24px;
+    right: 28px;
+    z-index: 99;
+    display: none;
+    align-items: center;
+    gap: 8px;
+    padding: 10px 18px;
+    background: linear-gradient(135deg, #6366f1 0%, #4f46e5 100%);
+    color: #ffffff;
+    border: 1px solid rgba(255, 255, 255, 0.2);
+    border-radius: 9999px;
+    font-family: inherit;
+    font-size: 0.85rem;
+    font-weight: 700;
+    box-shadow: 0 10px 25px rgba(79, 70, 229, 0.5);
+    cursor: pointer;
+    transition: transform 0.2s cubic-bezier(0.16, 1, 0.3, 1), box-shadow 0.2s ease;
+    backdrop-filter: blur(8px);
+  }
+  .scroll-bottom-pill:hover {
+    transform: translateY(-3px) scale(1.02);
+    box-shadow: 0 14px 30px rgba(79, 70, 229, 0.65);
+    background: linear-gradient(135deg, #4f46e5 0%, #4338ca 100%);
+  }
+  .scroll-bottom-pill:active {
+    transform: translateY(0) scale(0.98);
+  }
 </style>
 </head>
 <body>
@@ -1089,6 +1120,11 @@ DASHBOARD_HTML = """<!DOCTYPE html>
   </div>
 </div>
 
+<!-- Floating Scroll to Latest Pill -->
+<button id="btn-scroll-bottom" class="scroll-bottom-pill" onclick="scrollToBottomManual()">
+  <span>⬇️</span> <span>Jump to Latest</span>
+</button>
+
 <script>
 const LANG_NAMES = {
   'hi-IN':'Hindi (हिन्दी)','ta-IN':'Tamil (தமிழ்)','te-IN':'Telugu (తెలుగు)','bn-IN':'Bengali (বাংলা)',
@@ -1112,6 +1148,8 @@ function showTab(name) {
   
   if (name === 'escalations') loadEscalations();
   else if (name === 'patients') loadPatients();
+
+  updateScrollButton();
 }
 
 // ── Patients Roster ──────────────────────────────────────────────────────────
@@ -1226,6 +1264,8 @@ async function triggerCheckin(patientId) {
   }
 
   showTab('logs');
+  autoScrollEnabled = true;
+  updateScrollButton();
   clearLiveCall();
 
   const patient = patients.find(p => p.id === patientId);
@@ -1264,6 +1304,130 @@ let isPlayingTurn = false;
 let currentTurn = null;
 let turnQueue = [];
 let pendingCallEnd = null;
+
+// ── Smart Auto-Scroll System ────────────────────────────────────────────────
+let autoScrollEnabled = true;
+let isProgrammaticScroll = false;
+let programmaticScrollTimer = null;
+
+function getDistanceFromBottom() {
+  const scrollHeight = Math.max(document.documentElement.scrollHeight, document.body.scrollHeight);
+  const scrollTop = window.scrollY || window.pageYOffset || document.documentElement.scrollTop;
+  const clientHeight = window.innerHeight || document.documentElement.clientHeight;
+  return scrollHeight - (scrollTop + clientHeight);
+}
+
+function updateScrollButton() {
+  const btn = document.getElementById('btn-scroll-bottom');
+  if (!btn) return;
+  const logsTab = document.getElementById('tab-logs');
+  const isLogsActive = logsTab && logsTab.classList.contains('active');
+  const transcript = document.getElementById('call-transcript');
+  const hasContent = transcript && !document.getElementById('transcript-empty');
+  const dist = getDistanceFromBottom();
+  if (isLogsActive && !autoScrollEnabled && hasContent && dist > 70) {
+    btn.style.display = 'inline-flex';
+  } else {
+    btn.style.display = 'none';
+  }
+}
+
+function smartScrollToBottom() {
+  if (!autoScrollEnabled) return;
+  const dist = getDistanceFromBottom();
+  if (dist > 15) {
+    isProgrammaticScroll = true;
+    clearTimeout(programmaticScrollTimer);
+    window.scrollTo({ top: document.body.scrollHeight, behavior: 'smooth' });
+    programmaticScrollTimer = setTimeout(() => {
+      isProgrammaticScroll = false;
+    }, 350);
+  }
+}
+
+function scrollToBottomManual() {
+  autoScrollEnabled = true;
+  updateScrollButton();
+  isProgrammaticScroll = true;
+  clearTimeout(programmaticScrollTimer);
+  window.scrollTo({ top: document.body.scrollHeight, behavior: 'smooth' });
+  programmaticScrollTimer = setTimeout(() => {
+    isProgrammaticScroll = false;
+  }, 400);
+}
+
+// User-initiated scroll listeners to detect user scrolling above
+window.addEventListener('wheel', (e) => {
+  if (e.deltaY < 0) {
+    // User is scrolling UP
+    autoScrollEnabled = false;
+    isProgrammaticScroll = false;
+    clearTimeout(programmaticScrollTimer);
+    updateScrollButton();
+  } else if (e.deltaY > 0) {
+    // User is scrolling DOWN
+    setTimeout(() => {
+      if (getDistanceFromBottom() < 60) {
+        autoScrollEnabled = true;
+        updateScrollButton();
+      }
+    }, 50);
+  }
+}, { passive: true });
+
+let touchStartY = 0;
+window.addEventListener('touchstart', (e) => {
+  if (e.touches && e.touches.length > 0) {
+    touchStartY = e.touches[0].clientY;
+  }
+}, { passive: true });
+
+window.addEventListener('touchmove', (e) => {
+  if (e.touches && e.touches.length > 0) {
+    const currentY = e.touches[0].clientY;
+    if (currentY > touchStartY + 15) {
+      // Swiping finger downward scrolls page upward
+      autoScrollEnabled = false;
+      isProgrammaticScroll = false;
+      clearTimeout(programmaticScrollTimer);
+      updateScrollButton();
+    } else if (currentY < touchStartY - 15) {
+      setTimeout(() => {
+        if (getDistanceFromBottom() < 60) {
+          autoScrollEnabled = true;
+          updateScrollButton();
+        }
+      }, 50);
+    }
+  }
+}, { passive: true });
+
+window.addEventListener('keydown', (e) => {
+  if (['PageUp', 'ArrowUp', 'Home'].includes(e.key)) {
+    autoScrollEnabled = false;
+    isProgrammaticScroll = false;
+    clearTimeout(programmaticScrollTimer);
+    updateScrollButton();
+  } else if (['PageDown', 'ArrowDown', 'End'].includes(e.key)) {
+    setTimeout(() => {
+      if (getDistanceFromBottom() < 60) {
+        autoScrollEnabled = true;
+        updateScrollButton();
+      }
+    }, 80);
+  }
+});
+
+window.addEventListener('scroll', () => {
+  if (isProgrammaticScroll) return;
+  const dist = getDistanceFromBottom();
+  if (dist > 120) {
+    autoScrollEnabled = false;
+  } else if (dist < 50) {
+    autoScrollEnabled = true;
+  }
+  updateScrollButton();
+}, { passive: true });
 
 function getCallAudio() {
   return document.getElementById('call-audio');
@@ -1358,7 +1522,7 @@ function createSpeechBubble(role, speaker, lang, fullText, speakerVoice, gender)
   wrap.appendChild(action);
 
   transcript.appendChild(wrap);
-  window.scrollTo({ top: document.body.scrollHeight, behavior: 'smooth' });
+  smartScrollToBottom();
 
   return { wrap, bubble, action };
 }
@@ -1429,7 +1593,7 @@ function playNextTurn() {
         bubbleElements.bubble.appendChild(cursor);
       }
     }
-    window.scrollTo({ top: document.body.scrollHeight, behavior: 'smooth' });
+    smartScrollToBottom();
   };
 
   cAudio.onended = () => {
@@ -1498,13 +1662,16 @@ function applyCallEnd(data) {
       </button>
     `;
     transcript.appendChild(card);
-    window.scrollTo({ top: document.body.scrollHeight, behavior: 'smooth' });
+    smartScrollToBottom();
   }
 
   loadPatients();
 }
 
 function clearLiveCall() {
+  autoScrollEnabled = true;
+  updateScrollButton();
+
   const cAudio = getCallAudio();
   if (cAudio) {
     try { cAudio.pause(); cAudio.currentTime = 0; cAudio.src = ''; } catch (e) {}
