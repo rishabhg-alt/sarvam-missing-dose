@@ -1285,24 +1285,10 @@ function updateAudioButton() {
 function unlockAudio() {
   if (!audioUnlocked) {
     try {
-      const silent = "data:audio/wav;base64,UklGRigAAABXQVZFZm10IBIAAAABAAEARKwAAIhYAQACABAAAABkYXRhAgAAAAEA";
-      const c = getCallAudio();
-      if (c) {
-        c.src = silent;
-        c.play().then(() => {
-          c.pause();
-          c.currentTime = 0;
-          audioUnlocked = true;
-        }).catch(() => {});
-      }
-      const r = getReplayAudio();
-      if (r) {
-        r.src = silent;
-        r.play().then(() => {
-          r.pause();
-          r.currentTime = 0;
-        }).catch(() => {});
-      }
+      const dummy = new Audio("data:audio/wav;base64,UklGRigAAABXQVZFZm10IBIAAAABAAEARKwAAIhYAQACABAAAABkYXRhAgAAAAEA");
+      dummy.play().then(() => {
+        audioUnlocked = true;
+      }).catch(() => {});
     } catch (e) {}
   }
 }
@@ -1316,7 +1302,7 @@ function toggleAudio() {
   const cAudio = getCallAudio();
   const rAudio = getReplayAudio();
 
-  // Volume & muted property toggle happens live without stopping or reloading!
+  // Volume & muted property toggle happens live without stopping, pausing, or reloading!
   if (cAudio) {
     cAudio.muted = !audioEnabled;
     cAudio.volume = audioEnabled ? 1.0 : 0.0;
@@ -1459,11 +1445,7 @@ function playNextTurn() {
   };
 
   cAudio.play().catch(e => {
-    console.warn('Play prevented or delayed:', e);
-    if (bubbleElements && bubbleElements.bubble) {
-      bubbleElements.bubble.textContent = turn.text;
-    }
-    setTimeout(finishTurn, (words.length * 200) + 200);
+    console.warn('Audio play request status:', e);
   });
 }
 
