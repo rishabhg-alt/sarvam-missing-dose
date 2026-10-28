@@ -1479,7 +1479,7 @@ function toggleAudio() {
 
 function enqueueTurn(turn) {
   // Pre-load audio into browser cache
-  const audioUrl = '/api/speak?role=' + turn.role + '&lang=' + encodeURIComponent(turn.lang) + '&speaker=' + encodeURIComponent(turn.speaker_voice || '') + '&gender=' + encodeURIComponent(turn.gender || 'female') + '&text=' + encodeURIComponent(turn.text);
+  const audioUrl = '/api/speak?role=' + turn.role + '&lang=' + encodeURIComponent(turn.lang) + '&speaker=' + encodeURIComponent(turn.speaker_voice || '') + '&gender=' + encodeURIComponent(turn.gender || (turn.role === 'agent' ? 'female' : 'male')) + '&text=' + encodeURIComponent(turn.text);
   const pre = new Audio(audioUrl);
   pre.preload = "auto";
   pre.load();
@@ -1551,7 +1551,7 @@ function playNextTurn() {
   if (wave) wave.style.display = 'flex';
 
   const cAudio = getCallAudio();
-  const audioUrl = '/api/speak?role=' + turn.role + '&lang=' + encodeURIComponent(turn.lang) + '&speaker=' + encodeURIComponent(turn.speaker_voice || '') + '&gender=' + encodeURIComponent(turn.gender || 'female') + '&text=' + encodeURIComponent(turn.text);
+  const audioUrl = '/api/speak?role=' + turn.role + '&lang=' + encodeURIComponent(turn.lang) + '&speaker=' + encodeURIComponent(turn.speaker_voice || '') + '&gender=' + encodeURIComponent(turn.gender || (turn.role === 'agent' ? 'female' : 'male')) + '&text=' + encodeURIComponent(turn.text);
 
   cAudio.onplaying = null;
   cAudio.ontimeupdate = null;
@@ -1628,7 +1628,7 @@ function playSingleTurn(role, lang, text, speakerVoice, gender) {
     }
   }
 
-  const audioUrl = '/api/speak?role=' + role + '&lang=' + encodeURIComponent(lang) + '&speaker=' + encodeURIComponent(speakerVoice || '') + '&gender=' + encodeURIComponent(gender || 'female') + '&text=' + encodeURIComponent(text);
+  const audioUrl = '/api/speak?role=' + role + '&lang=' + encodeURIComponent(lang) + '&speaker=' + encodeURIComponent(speakerVoice || '') + '&gender=' + encodeURIComponent(gender || (role === 'agent' ? 'female' : 'male')) + '&text=' + encodeURIComponent(text);
   rAudio.muted = !audioEnabled;
   rAudio.volume = audioEnabled ? 1.0 : 0.0;
   rAudio.src = audioUrl;
