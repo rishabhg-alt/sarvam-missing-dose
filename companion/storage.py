@@ -8,7 +8,9 @@ import json
 from pathlib import Path
 from datetime import datetime
 
-DB_PATH = Path(__file__).parent.parent / "checkins.db"
+import os
+_DATA_DIR = Path(os.getenv("RENDER_DISK_PATH", "/data")) if os.getenv("RENDER") else Path(__file__).parent.parent
+DB_PATH = _DATA_DIR / "checkins.db"
 
 def _conn():
     c = sqlite3.connect(DB_PATH)

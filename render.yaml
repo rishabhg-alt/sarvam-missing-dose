@@ -1,0 +1,25 @@
+services:
+  - type: web
+    name: sarvam-missing-dose
+    runtime: python
+    buildCommand: pip install -r requirements.txt
+    startCommand: python dashboard.py
+    envVars:
+      - key: SARVAM_API_KEY
+        sync: false
+      - key: SMTP_HOST
+        sync: false
+      - key: SMTP_PORT
+        sync: false
+      - key: SMTP_USER
+        sync: false
+      - key: SMTP_PASS
+        sync: false
+      - key: SMTP_FROM
+        sync: false
+      - key: ESCALATION_WEBHOOK_URL
+        sync: false
+    disk:
+      name: data
+      mountPath: /data
+      sizeGB: 1

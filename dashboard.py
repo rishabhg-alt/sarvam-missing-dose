@@ -548,7 +548,9 @@ async def dashboard():
 
 
 if __name__ == "__main__":
+    import os
+    port = int(os.getenv("PORT", "8000"))
     print("🏥 Missed-Dose Companion Dashboard")
-    print("   http://localhost:8000")
+    print(f"   http://localhost:{port}")
     print("   Press Ctrl+C to stop\n")
-    uvicorn.run(app, host="0.0.0.0", port=8000, log_level="warning")
+    uvicorn.run(app, host="0.0.0.0", port=port, log_level="warning")
