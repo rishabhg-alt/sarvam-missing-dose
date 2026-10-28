@@ -47,27 +47,37 @@ def simulate_call(patient_id: str, patient_responses: list = None, play_audio: b
     print(f"{'='*60}\n")
     print("🔔 [Dialling...]\n")
 
-    responses = patient_responses or ["Yes, I am taking my medicines and I feel okay."] * 5
+    patient_responses = patient_responses or conversation.PATIENT_DEMO_RESPONSES.get(patient_id)
+    report = None
+    turn_idx = 0
 
-    assistant_replies, report = conversation.run_text_conversation(patient, responses)
+    for item_type, content in conversation.run_turn_by_turn(patient, patient_responses):
+        if item_type == "agent":
+            turn_idx += 1
+            print(f"🤖 Agent ({lang}):\n{content}\n")
+            if play_audio:
+                try:
+                    from companion import tts
+                    from companion.config import VOICE_MAP
+                    audio = tts.speak(content, lang, speaker=VOICE_MAP.get(lang))
+                    play_audio_if_possible(audio, turn_idx)
+                except Exception as e:
+                    print(f"   ⚠️  Agent TTS error: {e}")
 
-    for i, reply in enumerate(assistant_replies):
-        # Strip the JSON block from display
-        display_reply = reply.split("```json")[0].strip()
-        if display_reply:
-            print(f"🤖 Agent ({lang}):\n{display_reply}\n")
+        elif item_type == "patient":
+            turn_idx += 1
+            print(f"👤 Patient ({patient['name']}):\n{content}\n")
+            if play_audio:
+                try:
+                    from companion import tts
+                    from companion.config import PATIENT_VOICE_MAP
+                    audio = tts.speak(content, lang, speaker=PATIENT_VOICE_MAP.get(lang))
+                    play_audio_if_possible(audio, turn_idx)
+                except Exception as e:
+                    print(f"   ⚠️  Patient TTS error: {e}")
 
-        if play_audio and display_reply:
-            try:
-                from companion import tts
-                audio = tts.speak(display_reply, lang)
-                saved = play_audio_if_possible(audio, i)
-                print(f"   🔊 Audio saved: {saved}")
-            except Exception as e:
-                print(f"   ⚠️  TTS error: {e}")
-
-        if patient_responses and i < len(patient_responses):
-            print(f"👤 Patient: {patient_responses[i]}\n")
+        elif item_type == "report":
+            report = content
 
     print("\n" + "="*60)
     print("📋 CHECK-IN REPORT")

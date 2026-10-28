@@ -55,16 +55,20 @@ async def lifespan(app: FastAPI):
 
 app = FastAPI(title="Missed-Dose Companion", lifespan=lifespan)
 
-# ── SSE log bus ───────────────────────────────────────────────────────────────
+# ── SSE event bus ─────────────────────────────────────────────────────────────
 
 _log_queues: list[queue.Queue] = []
 
-def broadcast_log(msg: str):
+def broadcast_event(event_dict: dict):
+    payload = json.dumps(event_dict, ensure_ascii=False)
     for q in list(_log_queues):
         try:
-            q.put_nowait(msg)
+            q.put_nowait(payload)
         except queue.Full:
             pass
+
+def broadcast_log(msg: str):
+    broadcast_event({"type": "log", "text": msg})
 
 
 class LogCapture:
@@ -96,31 +100,74 @@ _active_jobs: dict[str, str] = {}   # patient_id -> "running" | "done" | "error"
 
 
 def _run_checkin_thread(patient_id: str):
-    """Run a check-in in a background thread so the HTTP response returns immediately."""
+    """Run an interactive turn-by-turn check-in, streaming both speech turns and reports."""
     _active_jobs[patient_id] = "running"
     try:
-        from companion.call_simulator import simulate_call
+        from companion import conversation, patient_db, escalation, notifier
         from companion.storage import save_checkin
-        from companion.escalation import evaluate_and_escalate
-        from companion.notifier import notify
 
-        broadcast_log(f"[{patient_id}] Starting check-in...")
-        report = simulate_call(patient_id)
+        patient = patient_db.get_patient(patient_id)
+        if not patient:
+            broadcast_log(f"[{patient_id}] ❌ Patient not found.")
+            _active_jobs[patient_id] = "error"
+            return
+
+        lang = patient["language"]
+        broadcast_event({
+            "type": "call_start",
+            "patient_id": patient_id,
+            "patient_name": patient["name"],
+            "phone": patient["phone"],
+            "language": lang
+        })
+        broadcast_log(f"📞 CALL CONNECTED: {patient['name']} ({patient['phone']}) in {lang}")
+
+        report = None
+        turn_num = 0
+
+        for item_type, content in conversation.run_turn_by_turn(patient):
+            if item_type == "agent":
+                turn_num += 1
+                broadcast_event({
+                    "type": "turn",
+                    "role": "agent",
+                    "speaker": "AI Clinic Assistant",
+                    "text": content,
+                    "lang": lang,
+                    "turn": turn_num
+                })
+            elif item_type == "patient":
+                turn_num += 1
+                broadcast_event({
+                    "type": "turn",
+                    "role": "patient",
+                    "speaker": patient["name"],
+                    "text": content,
+                    "lang": lang,
+                    "turn": turn_num
+                })
+            elif item_type == "report":
+                report = content
 
         if report:
-            patient = patient_db.get_patient(patient_id)
-            triggered = evaluate_and_escalate(patient, report)
+            triggered = escalation.evaluate_and_escalate(patient, report)
             escalated = bool(triggered)
             save_checkin(patient, report, escalated=escalated)
             if triggered:
-                notify(patient, triggered, report)
-            broadcast_log(f"[{patient_id}] ✅ Check-in complete.")
+                notifier.notify(patient, triggered, report)
+            broadcast_event({
+                "type": "call_end",
+                "patient_id": patient_id,
+                "escalated": escalated,
+                "report": report
+            })
+            broadcast_log(f"[{patient_id}] ✅ Call completed. Outcome: {report.get('summary', 'Done')}")
         else:
-            broadcast_log(f"[{patient_id}] ⚠️ No report extracted.")
+            broadcast_log(f"[{patient_id}] ⚠️ Call ended without structured report.")
 
         _active_jobs[patient_id] = "done"
     except Exception as e:
-        broadcast_log(f"[{patient_id}] ❌ Error: {e}")
+        broadcast_log(f"[{patient_id}] ❌ Call error: {e}")
         _active_jobs[patient_id] = "error"
 
 
@@ -173,10 +220,25 @@ def api_trigger_checkin(patient_id: str):
     return {"status": "started", "patient_id": patient_id}
 
 
+@app.get("/api/speak")
+def api_speak(text: str, lang: str = "hi-IN", role: str = "agent"):
+    """Synthesizes text to speech using Sarvam Bulbul and returns WAV audio."""
+    from companion import tts
+    from companion.config import VOICE_MAP, PATIENT_VOICE_MAP
+    from fastapi.responses import Response
+
+    speaker = VOICE_MAP.get(lang, "ritu") if role == "agent" else PATIENT_VOICE_MAP.get(lang, "shubh")
+    try:
+        audio = tts.speak(text, lang, speaker=speaker)
+        return Response(content=audio, media_type="audio/wav")
+    except Exception as e:
+        return JSONResponse({"error": str(e)}, status_code=500)
+
+
 @app.get("/api/logs")
 async def api_logs(request: Request) -> StreamingResponse:
-    """SSE endpoint — streams live logs to the browser."""
-    q: queue.Queue = queue.Queue(maxsize=100)
+    """SSE endpoint — streams live structured turn events and logs to the browser."""
+    q: queue.Queue = queue.Queue(maxsize=200)
     _log_queues.append(q)
 
     async def generator() -> AsyncGenerator[str, None]:
@@ -186,11 +248,12 @@ async def api_logs(request: Request) -> StreamingResponse:
                     break
                 try:
                     msg = q.get_nowait()
-                    yield f"data: {json.dumps(msg)}\n\n"
+                    yield f"data: {msg}\n\n"
                 except queue.Empty:
                     await asyncio.sleep(0.2)
         finally:
-            _log_queues.remove(q)
+            if q in _log_queues:
+                _log_queues.remove(q)
 
     return StreamingResponse(generator(), media_type="text/event-stream",
                              headers={"Cache-Control": "no-cache", "X-Accel-Buffering": "no"})
@@ -296,6 +359,25 @@ DASHBOARD_HTML = """<!DOCTYPE html>
                flex: 1; box-shadow: 0 1px 4px rgba(0,0,0,0.08); }
   .stat-card .num { font-size: 2rem; font-weight: 700; color: #6c63ff; }
   .stat-card .lbl { font-size: 0.8rem; color: #888; margin-top: 2px; }
+
+  /* Interactive Call Bubbles */
+  .bubble-wrap { display: flex; flex-direction: column; max-width: 82%; animation: fadein 0.25s ease; margin-bottom: 12px; }
+  .bubble-wrap.agent { align-self: flex-start; }
+  .bubble-wrap.patient { align-self: flex-end; }
+  .bubble-sender { font-size: 0.74rem; font-weight: 700; margin-bottom: 4px; display: flex; align-items: center; gap: 6px; }
+  .bubble-wrap.agent .bubble-sender { color: #4f46e5; }
+  .bubble-wrap.patient .bubble-sender { justify-content: flex-end; color: #059669; }
+  .bubble-card { padding: 12px 16px; border-radius: 14px; font-size: 0.92rem; line-height: 1.5; box-shadow: 0 1px 3px rgba(0,0,0,0.06); }
+  .bubble-wrap.agent .bubble-card { background: white; border: 1px solid #e0e7ff; color: #1e1b4b; border-bottom-left-radius: 4px; }
+  .bubble-wrap.patient .bubble-card { background: #ecfdf5; border: 1px solid #a7f3d0; color: #064e3b; border-bottom-right-radius: 4px; }
+  .bubble-action { margin-top: 6px; display: flex; gap: 8px; font-size: 0.72rem; }
+  .bubble-wrap.patient .bubble-action { justify-content: flex-end; }
+  .play-turn-btn { background: none; border: 1px solid #cbd5e1; border-radius: 6px; padding: 2px 8px; font-size: 0.72rem; cursor: pointer; color: #475569; display: flex; align-items: center; gap: 4px; }
+  .play-turn-btn:hover { background: #f1f5f9; color: #0f172a; }
+
+  /* Pulsing live dot */
+  .live-dot { width: 10px; height: 10px; background: #10b981; border-radius: 50%; display: inline-block; animation: pulse 1.5s infinite; }
+  @keyframes pulse { 0% { transform: scale(0.95); box-shadow: 0 0 0 0 rgba(16, 185, 129, 0.7); } 70% { transform: scale(1); box-shadow: 0 0 0 8px rgba(16, 185, 129, 0); } 100% { transform: scale(0.95); box-shadow: 0 0 0 0 rgba(16, 185, 129, 0); } }
 </style>
 </head>
 <body>
@@ -342,8 +424,51 @@ DASHBOARD_HTML = """<!DOCTYPE html>
 
   <!-- Logs tab -->
   <section id="tab-logs">
-    <h2>Live Check-In Logs</h2>
-    <div id="log-console">Waiting for activity…</div>
+    <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:16px">
+      <h2>📞 Live Outbound Call Session</h2>
+      <div style="display:flex; gap:10px; align-items:center">
+        <button id="btn-audio-toggle" class="btn btn-sm" style="background:#e0e7ff; color:#4338ca" onclick="toggleAudio()">
+          🔊 Voice Audio: ON
+        </button>
+        <button class="btn btn-sm" style="background:#f3f4f6; color:#4b5563" onclick="clearLiveCall()">
+          🗑 Clear Transcript
+        </button>
+      </div>
+    </div>
+
+    <!-- Active Call Banner -->
+    <div id="call-banner" style="display:none; background:white; border-radius:12px; padding:16px 20px; border-left:5px solid #10b981; box-shadow:0 1px 4px rgba(0,0,0,0.06); margin-bottom:16px">
+      <div style="display:flex; justify-content:space-between; align-items:center">
+        <div>
+          <div style="font-weight:700; font-size:1rem" id="call-patient-name">Active Call: Ramesh Kumar</div>
+          <div style="font-size:0.8rem; color:#6b7280; margin-top:2px" id="call-details">Language: Hindi (hi-IN) · Phone: +919876543210</div>
+        </div>
+        <div style="display:flex; align-items:center; gap:8px">
+          <span class="live-dot"></span>
+          <span style="font-size:0.8rem; font-weight:600; color:#059669" id="call-status-badge">Call in Progress</span>
+        </div>
+      </div>
+    </div>
+
+    <!-- Audio Player Indicator -->
+    <div id="audio-playing-indicator" style="display:none; background:#ede9fe; color:#6d28d9; padding:8px 16px; border-radius:8px; font-size:0.82rem; font-weight:600; margin-bottom:14px; align-items:center; gap:8px">
+      <span>🔊 Speaking:</span>
+      <span id="audio-speaking-text" style="font-weight:400; font-style:italic">...</span>
+    </div>
+
+    <!-- Live Speech Bubbles -->
+    <div id="call-transcript" style="display:flex; flex-direction:column; margin-bottom:20px; min-height:120px">
+      <div class="empty" id="transcript-empty">
+        Ready for outbound call.<br>
+        Click <strong>📞 Check In</strong> on any patient to start a live voice conversation in their native language!
+      </div>
+    </div>
+
+    <!-- Raw Logs Collapsible -->
+    <details style="background:white; border-radius:10px; border:1px solid #e5e7eb; padding:12px">
+      <summary style="font-size:0.82rem; font-weight:600; color:#6b7280; cursor:pointer">Raw Technical & Escalation Logs</summary>
+      <div id="log-console" style="margin-top:10px; background:#1a1a2e; color:#a8ff78; font-family:'SF Mono',monospace; font-size:0.75rem; padding:12px; border-radius:8px; height:180px; overflow-y:auto; line-height:1.6; white-space:pre-wrap">Waiting for events…</div>
+    </details>
   </section>
 
 </main>
@@ -456,14 +581,31 @@ function renderPatients() {
 }
 
 async function triggerCheckin(patientId) {
+  unlockAudio();
   const btn = document.getElementById('btn-' + patientId);
   if (btn) {
     btn.disabled = true;
-    btn.textContent = '⏳ Running…';
+    btn.textContent = '⏳ Calling…';
   }
 
-  // Switch to logs tab to show live output
+  // Switch to logs tab
   showTab('logs');
+  clearLiveCall();
+
+  const patient = patients.find(p => p.id === patientId);
+  if (patient) {
+    const banner = document.getElementById('call-banner');
+    const pName = document.getElementById('call-patient-name');
+    const pDetails = document.getElementById('call-details');
+    const pBadge = document.getElementById('call-status-badge');
+    if (banner && pName && pDetails && pBadge) {
+      banner.style.display = 'block';
+      pName.textContent = 'Connecting Outbound Call: ' + patient.name;
+      const lang = LANG_NAMES[patient.language] || patient.language;
+      pDetails.textContent = 'Native Language: ' + lang + ' · Phone: ' + patient.phone;
+      pBadge.textContent = 'Dialing...';
+    }
+  }
 
   try {
     await fetch('/api/checkin/' + patientId, { method: 'POST' });
@@ -477,8 +619,131 @@ async function triggerCheckin(patientId) {
     const p = patients.find(x => x.id === patientId);
     if (p && p.job_status !== 'running') {
       clearInterval(poll);
+      if (btn) {
+        btn.disabled = false;
+        btn.textContent = '📞 Check In';
+      }
     }
   }, 3000);
+}
+
+// ── Audio Engine ───────────────────────────────────────────────────────────────
+let audioQueue = [];
+let isPlayingAudio = false;
+let audioEnabled = true;
+let audioUnlocked = false;
+
+function toggleAudio() {
+  audioEnabled = !audioEnabled;
+  const btn = document.getElementById('btn-audio-toggle');
+  if (btn) {
+    btn.innerHTML = audioEnabled ? '🔊 Voice Audio: ON' : '🔈 Voice Audio: MUTED';
+    btn.style.background = audioEnabled ? '#e0e7ff' : '#fee2e2';
+    btn.style.color = audioEnabled ? '#4338ca' : '#dc2626';
+  }
+  if (audioEnabled && !isPlayingAudio && audioQueue.length) {
+    playNextAudio();
+  }
+}
+
+function unlockAudio() {
+  if (!audioUnlocked) {
+    try {
+      const silent = new Audio("data:audio/wav;base64,UklGRigAAABXQVZFZm10IBIAAAABAAEARKwAAIhYAQACABAAAABkYXRhAgAAAAEA");
+      silent.play().then(() => { audioUnlocked = true; }).catch(() => {});
+    } catch (e) {}
+  }
+}
+
+function enqueueAudio(turn) {
+  audioQueue.push(turn);
+  if (!isPlayingAudio && audioEnabled) {
+    playNextAudio();
+  }
+}
+
+function playNextAudio() {
+  if (!audioEnabled || !audioQueue.length) {
+    isPlayingAudio = false;
+    const ind = document.getElementById('audio-playing-indicator');
+    if (ind) ind.style.display = 'none';
+    return;
+  }
+  isPlayingAudio = true;
+  const turn = audioQueue.shift();
+  const ind = document.getElementById('audio-playing-indicator');
+  const indText = document.getElementById('audio-speaking-text');
+  if (ind && indText) {
+    ind.style.display = 'flex';
+    indText.textContent = (turn.role === 'agent' ? '🤖 Clinic Assistant' : '👤 Patient') + ': "' + turn.text.substring(0, 45) + '..."';
+  }
+
+  const audioUrl = '/api/speak?role=' + turn.role + '&lang=' + encodeURIComponent(turn.lang) + '&text=' + encodeURIComponent(turn.text);
+  const audio = new Audio(audioUrl);
+  audio.onended = () => {
+    setTimeout(playNextAudio, 500); // Natural 500ms conversational pause
+  };
+  audio.onerror = (err) => {
+    console.warn('Audio synthesis error:', err);
+    setTimeout(playNextAudio, 200);
+  };
+  audio.play().catch(e => {
+    console.warn('Autoplay prevented:', e);
+    setTimeout(playNextAudio, 200);
+  });
+}
+
+function playSingleTurn(role, lang, text) {
+  unlockAudio();
+  const audioUrl = '/api/speak?role=' + role + '&lang=' + encodeURIComponent(lang) + '&text=' + encodeURIComponent(text);
+  const audio = new Audio(audioUrl);
+  audio.play().catch(e => console.warn(e));
+}
+
+function clearLiveCall() {
+  const transcript = document.getElementById('call-transcript');
+  if (transcript) {
+    transcript.innerHTML = '<div class="empty" id="transcript-empty">Ready for outbound call.<br>Click <strong>📞 Check In</strong> on any patient to start a live voice conversation in their native language!</div>';
+  }
+  const banner = document.getElementById('call-banner');
+  if (banner) banner.style.display = 'none';
+  const ind = document.getElementById('audio-playing-indicator');
+  if (ind) ind.style.display = 'none';
+  audioQueue = [];
+  isPlayingAudio = false;
+}
+
+function appendSpeechBubble(role, speaker, text, lang) {
+  const transcript = document.getElementById('call-transcript');
+  if (!transcript) return;
+  const empty = document.getElementById('transcript-empty');
+  if (empty) empty.remove();
+
+  const wrap = document.createElement('div');
+  wrap.className = 'bubble-wrap ' + (role === 'agent' ? 'agent' : 'patient');
+
+  const sender = document.createElement('div');
+  sender.className = 'bubble-sender';
+  sender.innerHTML = (role === 'agent' ? '🤖 ' : '👤 ') + speaker;
+
+  const card = document.createElement('div');
+  card.className = 'bubble-card';
+  card.textContent = text;
+
+  const action = document.createElement('div');
+  action.className = 'bubble-action';
+  const playBtn = document.createElement('button');
+  playBtn.className = 'play-turn-btn';
+  playBtn.innerHTML = '🔊 Replay Audio';
+  playBtn.onclick = () => playSingleTurn(role, lang, text);
+  action.appendChild(playBtn);
+
+  wrap.appendChild(sender);
+  wrap.appendChild(card);
+  wrap.appendChild(action);
+
+  transcript.appendChild(wrap);
+  window.scrollTo({ top: document.body.scrollHeight, behavior: 'smooth' });
 }
 
 // ── History modal ─────────────────────────────────────────────────────────────
@@ -570,22 +835,58 @@ function showEscalationDetail(index) {
   renderModal(patient, { report, timestamp: e.timestamp });
 }
 
-// ── Live logs SSE ──────────────────────────────────────────────────────────────
+// ── Live Event Stream (SSE) ────────────────────────────────────────────────────
 const logConsole = document.getElementById('log-console');
 try {
   const evtSource = new EventSource('/api/logs');
   evtSource.onmessage = (e) => {
     try {
-      const line = document.createElement('div');
-      line.className = 'log-line';
-      line.textContent = JSON.parse(e.data);
-      if (logConsole) {
-        logConsole.appendChild(line);
-        logConsole.scrollTop = logConsole.scrollHeight;
-        while (logConsole.children.length > 300) logConsole.removeChild(logConsole.firstChild);
+      const parsed = JSON.parse(e.data);
+      if (typeof parsed === 'object' && parsed !== null) {
+        if (parsed.type === 'call_start') {
+          const banner = document.getElementById('call-banner');
+          const pName = document.getElementById('call-patient-name');
+          const pDetails = document.getElementById('call-details');
+          const pBadge = document.getElementById('call-status-badge');
+          if (banner) banner.style.display = 'block';
+          if (pName) pName.textContent = 'Active Call: ' + parsed.patient_name;
+          if (pDetails) pDetails.textContent = 'Language: ' + (LANG_NAMES[parsed.language] || parsed.language) + ' · Phone: ' + parsed.phone;
+          if (pBadge) pBadge.textContent = 'Connected (Live)';
+        } else if (parsed.type === 'turn') {
+          appendSpeechBubble(parsed.role, parsed.speaker, parsed.text, parsed.lang);
+          enqueueAudio(parsed);
+        } else if (parsed.type === 'call_end') {
+          const pBadge = document.getElementById('call-status-badge');
+          if (pBadge) {
+            pBadge.textContent = parsed.escalated ? 'Call Ended · 🚨 Escalated' : 'Call Ended · ✅ Adherent';
+            pBadge.style.color = parsed.escalated ? '#dc2626' : '#059669';
+          }
+          loadPatients();
+        } else if (parsed.type === 'log') {
+          if (logConsole) {
+            const line = document.createElement('div');
+            line.className = 'log-line';
+            line.textContent = parsed.text;
+            logConsole.appendChild(line);
+            logConsole.scrollTop = logConsole.scrollHeight;
+          }
+        }
+      } else {
+        if (logConsole) {
+          const line = document.createElement('div');
+          line.className = 'log-line';
+          line.textContent = String(parsed);
+          logConsole.appendChild(line);
+          logConsole.scrollTop = logConsole.scrollHeight;
+        }
       }
-    } catch (parseErr) {
-      console.warn('Log parse error:', parseErr);
+    } catch (err) {
+      if (logConsole) {
+        const line = document.createElement('div');
+        line.className = 'log-line';
+        line.textContent = e.data;
+        logConsole.appendChild(line);
+      }
     }
   };
   evtSource.onerror = (err) => {

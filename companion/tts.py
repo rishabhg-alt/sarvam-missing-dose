@@ -8,9 +8,10 @@ from companion.config import VOICE_MAP, TTS_MODEL
 load_dotenv()
 _client = SarvamAI(api_subscription_key=os.environ["SARVAM_API_KEY"])
 
-def speak(text: str, language_code: str) -> bytes:
+def speak(text: str, language_code: str, speaker: str = None) -> bytes:
     """Convert text to audio bytes using Bulbul TTS."""
-    speaker = VOICE_MAP.get(language_code, "ritu")
+    if not speaker:
+        speaker = VOICE_MAP.get(language_code, "ritu")
     response = _client.text_to_speech.convert(
         text=text,
         language_code=language_code,
