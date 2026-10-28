@@ -692,26 +692,35 @@ let audioEnabled = true;
 let audioUnlocked = false;
 let currentPlayingAudio = null;
 
-function toggleAudio() {
-  audioEnabled = !audioEnabled;
+function updateAudioButton() {
   const btn = document.getElementById('btn-audio-toggle');
   if (btn) {
     btn.innerHTML = audioEnabled ? '🔊 Voice Audio: ON' : '🔈 Voice Audio: MUTED';
     btn.style.background = audioEnabled ? '#e0e7ff' : '#fee2e2';
     btn.style.color = audioEnabled ? '#4338ca' : '#dc2626';
   }
+}
+
+function toggleAudio() {
+  unlockAudio();
+  audioEnabled = !audioEnabled;
+  updateAudioButton();
+
   if (!audioEnabled) {
-    // Immediately stop and mute any currently playing voice audio
+    // Immediately silence any active audio
     if (currentPlayingAudio) {
-      try {
-        currentPlayingAudio.pause();
-        currentPlayingAudio.currentTime = 0;
-      } catch (e) {}
-      currentPlayingAudio = null;
+      currentPlayingAudio.muted = true;
+      currentPlayingAudio.volume = 0;
     }
   } else {
-    // If unmuted and waiting, resume turn queue
-    if (!isPlayingTurn && turnQueue.length) {
+    // Unmute: immediately restore sound to active audio
+    if (currentPlayingAudio) {
+      currentPlayingAudio.muted = false;
+      currentPlayingAudio.volume = 1;
+      if (currentPlayingAudio.paused) {
+        currentPlayingAudio.play().catch(e => console.warn('Resume audio failed:', e));
+      }
+    } else if (!isPlayingTurn && turnQueue.length) {
       playNextTurn();
     }
   }
@@ -801,6 +810,12 @@ function playNextTurn() {
   let turnFinished = false;
   let wordStreamTimer = null;
 
+  const audio = turn.audioObj || new Audio('/api/speak?role=' + turn.role + '&lang=' + encodeURIComponent(turn.lang) + '&text=' + encodeURIComponent(turn.text));
+  currentPlayingAudio = audio;
+  audio.muted = !audioEnabled;
+  audio.volume = audioEnabled ? 1 : 0;
+  let audioStarted = false;
+
   function advanceToNextTurn() {
     if (turnFinished) return;
     turnFinished = true;
@@ -809,7 +824,7 @@ function playNextTurn() {
       if (bubbleElements.card) bubbleElements.card.textContent = turn.text;
       if (bubbleElements.action) bubbleElements.action.style.display = 'flex';
     }
-    if (currentPlayingAudio) {
+    if (currentPlayingAudio === audio) {
       currentPlayingAudio = null;
     }
     // Natural slight conversational gap before the other party replies
@@ -841,8 +856,8 @@ function playNextTurn() {
           clearInterval(wordStreamTimer);
           cursor.remove();
           bubbleElements.card.textContent = turn.text;
-          // If audio was muted mid-turn or stopped, advance cleanly
-          if (!audioEnabled || !currentPlayingAudio) {
+          // Advance if audio already finished or paused
+          if (!currentPlayingAudio || currentPlayingAudio.ended || currentPlayingAudio.paused) {
             setTimeout(advanceToNextTurn, 180);
           }
         }
@@ -850,62 +865,52 @@ function playNextTurn() {
     }
   }
 
-  if (audioEnabled) {
-    const audio = turn.audioObj || new Audio('/api/speak?role=' + turn.role + '&lang=' + encodeURIComponent(turn.lang) + '&text=' + encodeURIComponent(turn.text));
-    currentPlayingAudio = audio;
-    let audioStarted = false;
+  // Trigger word streaming ONLY when audio playback has genuinely started producing sound
+  audio.onplaying = () => {
+    if (!audioStarted) {
+      audioStarted = true;
+      startWordStreaming(audio.duration);
+    }
+  };
 
-    // Trigger word streaming ONLY when audio playback has genuinely started producing sound
-    audio.onplaying = () => {
-      if (!audioStarted && audioEnabled) {
-        audioStarted = true;
-        startWordStreaming(audio.duration);
-      }
-    };
+  audio.onended = () => {
+    if (currentPlayingAudio === audio) currentPlayingAudio = null;
+    advanceToNextTurn();
+  };
 
-    audio.onended = () => {
-      if (currentPlayingAudio === audio) currentPlayingAudio = null;
-      advanceToNextTurn();
-    };
+  audio.onerror = (e) => {
+    console.warn('Audio playback error, streaming words visually:', e);
+    if (currentPlayingAudio === audio) currentPlayingAudio = null;
+    if (!audioStarted) {
+      audioStarted = true;
+      startWordStreaming(turn.text.split(' ').length * 0.22);
+    }
+  };
 
-    audio.onerror = (e) => {
-      console.warn('Audio playback error, streaming words visually:', e);
-      if (currentPlayingAudio === audio) currentPlayingAudio = null;
-      if (!audioStarted) {
-        audioStarted = true;
-        startWordStreaming(turn.text.split(' ').length * 0.22);
-      }
-    };
+  audio.play().catch(e => {
+    console.warn('Playback error or blocked, streaming visually:', e);
+    if (currentPlayingAudio === audio) currentPlayingAudio = null;
+    if (!audioStarted) {
+      audioStarted = true;
+      startWordStreaming(turn.text.split(' ').length * 0.22);
+    }
+  });
 
-    audio.play().catch(e => {
-      console.warn('Playback prevented or paused:', e);
-      if (currentPlayingAudio === audio) currentPlayingAudio = null;
-      if (!audioStarted) {
-        audioStarted = true;
-        startWordStreaming(turn.text.split(' ').length * 0.22);
-      }
-    });
-
-    // Safety timeout: only if audio fails to play after 7 seconds, fallback to visual stream
-    setTimeout(() => {
-      if (!audioStarted && !turnFinished) {
-        audioStarted = true;
-        startWordStreaming(turn.text.split(' ').length * 0.22);
-      }
-    }, 7000);
-
-  } else {
-    // Muted mode: stream words visually at natural reading cadence
-    startWordStreaming(turn.text.split(' ').length * 0.22);
-  }
+  // Safety timeout: only if audio fails to play after 6 seconds, fallback to visual stream
+  setTimeout(() => {
+    if (!audioStarted && !turnFinished) {
+      audioStarted = true;
+      startWordStreaming(turn.text.split(' ').length * 0.22);
+    }
+  }, 6000);
 }
 
 function playSingleTurn(role, lang, text) {
-  if (!audioEnabled) {
-    alert('Audio is currently muted. Please click "Voice Audio: MUTED" in the top bar to unmute first.');
-    return;
-  }
   unlockAudio();
+  if (!audioEnabled) {
+    audioEnabled = true;
+    updateAudioButton();
+  }
   if (currentPlayingAudio) {
     try {
       currentPlayingAudio.pause();
@@ -915,6 +920,8 @@ function playSingleTurn(role, lang, text) {
   }
   const audioUrl = '/api/speak?role=' + role + '&lang=' + encodeURIComponent(lang) + '&text=' + encodeURIComponent(text);
   const audio = new Audio(audioUrl);
+  audio.muted = false;
+  audio.volume = 1;
   currentPlayingAudio = audio;
   audio.onended = () => {
     if (currentPlayingAudio === audio) currentPlayingAudio = null;
