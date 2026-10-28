@@ -740,21 +740,44 @@ function toggleAudio() {
   const cAudio = getCallAudio();
   const rAudio = getReplayAudio();
 
-  if (cAudio) {
-    cAudio.muted = !audioEnabled;
-    cAudio.volume = audioEnabled ? 1.0 : 0.0;
-    // If unmuting during active turn, resume playback immediately (rewind if ended while muted)
-    if (audioEnabled && isPlayingTurn) {
-      if (cAudio.ended || cAudio.currentTime >= (cAudio.duration - 0.25) || cAudio.paused) {
-        cAudio.currentTime = (cAudio.ended || cAudio.currentTime >= (cAudio.duration - 0.25)) ? 0 : cAudio.currentTime;
-      }
-      cAudio.play().catch(e => console.warn('Unmute resume error:', e));
+  if (!audioEnabled) {
+    // Muting: immediately silence both audio channels
+    if (cAudio) {
+      cAudio.muted = true;
+      cAudio.volume = 0;
     }
-  }
+    if (rAudio) {
+      rAudio.muted = true;
+      rAudio.volume = 0;
+    }
+  } else {
+    // Unmuting: immediately restore voice and guarantee sound on current speaker
+    if (cAudio) {
+      cAudio.muted = false;
+      cAudio.volume = 1.0;
+      if (isPlayingTurn && currentTurn) {
+        try {
+          const audioUrl = '/api/speak?role=' + currentTurn.role + '&lang=' + encodeURIComponent(currentTurn.lang) + '&speaker=' + encodeURIComponent(currentTurn.speaker_voice || '') + '&gender=' + encodeURIComponent(currentTurn.gender || 'female') + '&text=' + encodeURIComponent(currentTurn.text);
+          // If audio reached the end while muted or was not loaded, reload and play immediately!
+          if (cAudio.ended || cAudio.paused || isNaN(cAudio.duration) || cAudio.currentTime >= (cAudio.duration - 0.2)) {
+            cAudio.src = audioUrl;
+          }
+          cAudio.play().catch(e => console.warn('Unmute play error:', e));
+        } catch (err) {
+          console.warn('Error in unmute play:', err);
+        }
+      } else if (!isPlayingTurn && turnQueue.length) {
+        playNextTurn();
+      }
+    }
 
-  if (rAudio) {
-    rAudio.muted = !audioEnabled;
-    rAudio.volume = audioEnabled ? 1.0 : 0.0;
+    if (rAudio) {
+      rAudio.muted = false;
+      rAudio.volume = 1.0;
+      if (rAudio.paused && rAudio.src && !rAudio.ended) {
+        rAudio.play().catch(e => console.warn('Replay unmute error:', e));
+      }
+    }
   }
 }
 
