@@ -537,14 +537,13 @@ async function loadEscalations() {
     escalations = await res.json();
     if (!tbody) return;
     if (!escalations.length) {
-      tbody.innerHTML = '<tr><td colspan="6" class="empty">No escalations yet — that\'s good! 🎉</td></tr>';
+      tbody.innerHTML = '<tr><td colspan="6" class="empty">No escalations yet — all clear! 🎉</td></tr>';
       return;
     }
-    tbody.innerHTML = escalations.map(e => {
+    tbody.innerHTML = escalations.map((e, index) => {
       const triggers = (Array.isArray(e.triggers) ? e.triggers : JSON.parse(e.triggers || '[]'))
         .map(t => `<span class="badge alert">${t.replace(/_/g,' ')}</span>`).join(' ');
       const report = typeof e.report === 'string' ? JSON.parse(e.report) : (e.report || {});
-      const safeE = JSON.stringify(e).replace(/'/g, "&#39;");
       return `<tr>
         <td style="white-space:nowrap;color:#888">${new Date(e.timestamp).toLocaleString('en-IN')}</td>
         <td><strong>${e.patient_name}</strong><br><span style="font-size:0.76rem;color:#aaa">${e.patient_id}</span></td>
@@ -552,7 +551,7 @@ async function loadEscalations() {
         <td style="font-size:0.8rem">${e.coordinator_email}<br>${e.coordinator_phone}</td>
         <td style="font-size:0.82rem;color:#555;max-width:220px">${report.summary || '—'}</td>
         <td><button class="btn btn-sm" style="background:#f0f4ff;color:#6c63ff"
-            onclick='showEscalationDetail(${JSON.stringify(JSON.stringify(e))})'>View</button></td>
+            onclick="showEscalationDetail(${index})">View</button></td>
       </tr>`;
     }).join('');
   } catch (err) {
@@ -563,8 +562,9 @@ async function loadEscalations() {
   }
 }
 
-function showEscalationDetail(eJson) {
-  const e = typeof eJson === 'string' ? JSON.parse(eJson) : eJson;
+function showEscalationDetail(index) {
+  const e = escalations[index];
+  if (!e) return;
   const report = typeof e.report === 'string' ? JSON.parse(e.report) : (e.report || {});
   const patient = { id: e.patient_id, name: e.patient_name };
   renderModal(patient, { report, timestamp: e.timestamp });
