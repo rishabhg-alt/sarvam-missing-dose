@@ -40,6 +40,13 @@ from companion.storage import init_db, get_checkin_history, get_all_escalations,
 
 # ── App init ─────────────────────────────────────────────────────────────────
 
+# Initialize immediately at startup
+try:
+    init_db()
+    patient_db.load_patients()
+except Exception as e:
+    print(f"Warning during startup init: {e}")
+
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     init_db()
@@ -302,9 +309,9 @@ DASHBOARD_HTML = """<!DOCTYPE html>
 </header>
 
 <nav>
-  <button class="active" onclick="showTab('patients')">👥 Patients</button>
-  <button onclick="showTab('escalations')">🚨 Escalations</button>
-  <button onclick="showTab('logs')">🖥 Live Logs</button>
+  <button id="nav-patients" class="active" onclick="showTab('patients')">👥 Patients</button>
+  <button id="nav-escalations" onclick="showTab('escalations')">🚨 Escalations</button>
+  <button id="nav-logs" onclick="showTab('logs')">🖥 Live Logs</button>
 </nav>
 
 <main>
@@ -361,35 +368,61 @@ let escalations = [];
 
 // ── Tab switching ────────────────────────────────────────────────────────────
 function showTab(name) {
-  document.querySelectorAll('section').forEach(s => s.classList.remove('active'));
-  document.querySelectorAll('nav button').forEach(b => b.classList.remove('active'));
-  document.getElementById('tab-' + name).classList.add('active');
-  event.target.classList.add('active');
-  if (name === 'escalations') loadEscalations();
+  try {
+    document.querySelectorAll('section').forEach(s => s.classList.remove('active'));
+    document.querySelectorAll('nav button').forEach(b => b.classList.remove('active'));
+    
+    const targetSection = document.getElementById('tab-' + name);
+    if (targetSection) targetSection.classList.add('active');
+    
+    const targetBtn = document.getElementById('nav-' + name);
+    if (targetBtn) targetBtn.classList.add('active');
+    
+    if (name === 'escalations') {
+      loadEscalations();
+    } else if (name === 'patients') {
+      loadPatients();
+    }
+  } catch (err) {
+    console.error('Error switching tab:', err);
+  }
 }
 
 // ── Patients ─────────────────────────────────────────────────────────────────
 async function loadPatients() {
-  const res = await fetch('/api/patients');
-  patients = await res.json();
-  renderStats();
-  renderPatients();
+  const grid = document.getElementById('patient-grid');
+  try {
+    const res = await fetch('/api/patients');
+    if (!res.ok) throw new Error('HTTP ' + res.status);
+    patients = await res.json();
+    renderStats();
+    renderPatients();
+  } catch (err) {
+    console.error('Failed to load patients:', err);
+    if (grid && !patients.length) {
+      grid.innerHTML = '<div class="empty" style="color:#dc2626">Failed to load patients (' + err.message + '). <button class="btn btn-sm btn-primary" onclick="loadPatients()" style="margin-left:8px">Retry</button></div>';
+    }
+  }
 }
 
 function renderStats() {
   const total = patients.length;
   const escalated = patients.filter(p => p.last_escalated).length;
   const checkedIn = patients.filter(p => p.total_checkins > 0).length;
-  document.getElementById('stats-row').innerHTML = `
-    <div class="stat-card"><div class="num">${total}</div><div class="lbl">Total Patients</div></div>
-    <div class="stat-card"><div class="num">${checkedIn}</div><div class="lbl">Checked In</div></div>
-    <div class="stat-card"><div class="num" style="color:#dc2626">${escalated}</div><div class="lbl">Escalated (last call)</div></div>
-  `;
+  const statsRow = document.getElementById('stats-row');
+  if (statsRow) {
+    statsRow.innerHTML = `
+      <div class="stat-card"><div class="num">${total}</div><div class="lbl">Total Patients</div></div>
+      <div class="stat-card"><div class="num">${checkedIn}</div><div class="lbl">Checked In</div></div>
+      <div class="stat-card"><div class="num" style="color:#dc2626">${escalated}</div><div class="lbl">Escalated (last call)</div></div>
+    `;
+  }
 }
 
 function renderPatients() {
   const grid = document.getElementById('patient-grid');
-  if (!patients.length) { grid.innerHTML = '<div class="empty">No patients found</div>'; return; }
+  if (!grid) return;
+  if (!patients.length) { grid.innerHTML = '<div class="empty">No patients found in database.</div>'; return; }
   grid.innerHTML = patients.map(p => {
     const lang = LANG_NAMES[p.language] || p.language;
     const lastTime = p.last_checkin ? new Date(p.last_checkin).toLocaleString('en-IN') : 'Never';
@@ -400,7 +433,7 @@ function renderPatients() {
         : p.total_checkins > 0
           ? '<span class="badge ok">✅ OK</span>'
           : '';
-    const meds = p.medications.map(m => `<span>💊 ${m}</span>`).join('<br>');
+    const meds = (p.medications || []).map(m => `<span>💊 ${m}</span>`).join('<br>');
     const btnDisabled = p.job_status === 'running' ? 'disabled' : '';
     return `
     <div class="patient-card" id="card-${p.id}">
@@ -424,16 +457,19 @@ function renderPatients() {
 
 async function triggerCheckin(patientId) {
   const btn = document.getElementById('btn-' + patientId);
-  btn.disabled = true;
-  btn.textContent = '⏳ Running…';
+  if (btn) {
+    btn.disabled = true;
+    btn.textContent = '⏳ Running…';
+  }
 
   // Switch to logs tab to show live output
-  document.querySelectorAll('section').forEach(s => s.classList.remove('active'));
-  document.querySelectorAll('nav button').forEach(b => b.classList.remove('active'));
-  document.getElementById('tab-logs').classList.add('active');
-  document.querySelectorAll('nav button')[2].classList.add('active');
+  showTab('logs');
 
-  await fetch('/api/checkin/' + patientId, { method: 'POST' });
+  try {
+    await fetch('/api/checkin/' + patientId, { method: 'POST' });
+  } catch (err) {
+    console.error('Trigger checkin failed:', err);
+  }
 
   // Poll for completion
   const poll = setInterval(async () => {
@@ -447,16 +483,20 @@ async function triggerCheckin(patientId) {
 
 // ── History modal ─────────────────────────────────────────────────────────────
 async function showHistory(patientId) {
-  const res = await fetch('/api/patients/' + patientId + '/history');
-  const history = await res.json();
-  const patient = patients.find(p => p.id === patientId);
-  if (!history.length) { alert('No check-in history yet.'); return; }
-  const latest = history[0];
-  renderModal(patient, latest);
+  try {
+    const res = await fetch('/api/patients/' + patientId + '/history');
+    if (!res.ok) throw new Error('HTTP ' + res.status);
+    const history = await res.json();
+    const patient = patients.find(p => p.id === patientId);
+    if (!history.length) { alert('No check-in history yet.'); return; }
+    renderModal(patient, history[0]);
+  } catch (err) {
+    alert('Failed to load history: ' + err.message);
+  }
 }
 
 function renderModal(patient, checkin) {
-  const r = checkin.report;
+  const r = checkin.report || {};
   const meds = Object.entries(r.medication_adherence || {}).map(([med, status]) =>
     `<div class="med-row"><span>${med}</span><span class="med-status ${status}">${status.toUpperCase()}</span></div>`
   ).join('');
@@ -469,9 +509,9 @@ function renderModal(patient, checkin) {
     .join('') || '<span style="color:#aaa;font-size:0.85rem">None</span>';
 
   document.getElementById('modal-body').innerHTML = `
-    <h3>📋 Check-In Report — ${patient.name}</h3>
+    <h3>📋 Check-In Report — ${patient ? patient.name : 'Patient'}</h3>
     <div style="font-size:0.78rem;color:#aaa;margin-bottom:16px">${new Date(checkin.timestamp).toLocaleString('en-IN')}</div>
-    <div class="report-section"><label>Medication Adherence</label>${meds}</div>
+    <div class="report-section"><label>Medication Adherence</label>${meds || '<span style="color:#aaa;font-size:0.85rem">None recorded</span>'}</div>
     <div class="report-section"><label>Symptoms Reported</label><div class="flag-list">${symptoms}</div></div>
     <div class="report-section"><label>Appointment Confirmed</label>
       <span class="badge ${r.appointment_confirmed ? 'ok' : 'alert'}">${r.appointment_confirmed ? 'Yes' : 'No / Unknown'}</span>
@@ -490,48 +530,70 @@ function closeModal(e) {
 
 // ── Escalations ───────────────────────────────────────────────────────────────
 async function loadEscalations() {
-  const res = await fetch('/api/escalations');
-  escalations = await res.json();
   const tbody = document.getElementById('escalation-tbody');
-  if (!escalations.length) {
-    tbody.innerHTML = '<tr><td colspan="6" class="empty">No escalations yet — that\'s good! 🎉</td></tr>';
-    return;
+  try {
+    const res = await fetch('/api/escalations');
+    if (!res.ok) throw new Error('HTTP ' + res.status);
+    escalations = await res.json();
+    if (!tbody) return;
+    if (!escalations.length) {
+      tbody.innerHTML = '<tr><td colspan="6" class="empty">No escalations yet — that\'s good! 🎉</td></tr>';
+      return;
+    }
+    tbody.innerHTML = escalations.map(e => {
+      const triggers = (Array.isArray(e.triggers) ? e.triggers : JSON.parse(e.triggers || '[]'))
+        .map(t => `<span class="badge alert">${t.replace(/_/g,' ')}</span>`).join(' ');
+      const report = typeof e.report === 'string' ? JSON.parse(e.report) : (e.report || {});
+      const safeE = JSON.stringify(e).replace(/'/g, "&#39;");
+      return `<tr>
+        <td style="white-space:nowrap;color:#888">${new Date(e.timestamp).toLocaleString('en-IN')}</td>
+        <td><strong>${e.patient_name}</strong><br><span style="font-size:0.76rem;color:#aaa">${e.patient_id}</span></td>
+        <td>${triggers}</td>
+        <td style="font-size:0.8rem">${e.coordinator_email}<br>${e.coordinator_phone}</td>
+        <td style="font-size:0.82rem;color:#555;max-width:220px">${report.summary || '—'}</td>
+        <td><button class="btn btn-sm" style="background:#f0f4ff;color:#6c63ff"
+            onclick='showEscalationDetail(${JSON.stringify(JSON.stringify(e))})'>View</button></td>
+      </tr>`;
+    }).join('');
+  } catch (err) {
+    console.error('Failed to load escalations:', err);
+    if (tbody) {
+      tbody.innerHTML = '<tr><td colspan="6" class="empty" style="color:#dc2626">Failed to load escalations: ' + err.message + '</td></tr>';
+    }
   }
-  tbody.innerHTML = escalations.map(e => {
-    const triggers = (Array.isArray(e.triggers) ? e.triggers : JSON.parse(e.triggers || '[]'))
-      .map(t => `<span class="badge alert">${t.replace(/_/g,' ')}</span>`).join(' ');
-    const report = typeof e.report === 'string' ? JSON.parse(e.report) : e.report;
-    return `<tr>
-      <td style="white-space:nowrap;color:#888">${new Date(e.timestamp).toLocaleString('en-IN')}</td>
-      <td><strong>${e.patient_name}</strong><br><span style="font-size:0.76rem;color:#aaa">${e.patient_id}</span></td>
-      <td>${triggers}</td>
-      <td style="font-size:0.8rem">${e.coordinator_email}<br>${e.coordinator_phone}</td>
-      <td style="font-size:0.82rem;color:#555;max-width:220px">${report.summary || '—'}</td>
-      <td><button class="btn btn-sm" style="background:#f0f4ff;color:#6c63ff"
-          onclick='showEscalationDetail(${JSON.stringify(JSON.stringify(e))})'>View</button></td>
-    </tr>`;
-  }).join('');
 }
 
 function showEscalationDetail(eJson) {
-  const e = JSON.parse(eJson);
-  const report = typeof e.report === 'string' ? JSON.parse(e.report) : e.report;
+  const e = typeof eJson === 'string' ? JSON.parse(eJson) : eJson;
+  const report = typeof e.report === 'string' ? JSON.parse(e.report) : (e.report || {});
   const patient = { id: e.patient_id, name: e.patient_name };
   renderModal(patient, { report, timestamp: e.timestamp });
 }
 
 // ── Live logs SSE ──────────────────────────────────────────────────────────────
 const logConsole = document.getElementById('log-console');
-const evtSource = new EventSource('/api/logs');
-evtSource.onmessage = (e) => {
-  const line = document.createElement('div');
-  line.className = 'log-line';
-  line.textContent = JSON.parse(e.data);
-  logConsole.appendChild(line);
-  logConsole.scrollTop = logConsole.scrollHeight;
-  // Keep last 300 lines
-  while (logConsole.children.length > 300) logConsole.removeChild(logConsole.firstChild);
-};
+try {
+  const evtSource = new EventSource('/api/logs');
+  evtSource.onmessage = (e) => {
+    try {
+      const line = document.createElement('div');
+      line.className = 'log-line';
+      line.textContent = JSON.parse(e.data);
+      if (logConsole) {
+        logConsole.appendChild(line);
+        logConsole.scrollTop = logConsole.scrollHeight;
+        while (logConsole.children.length > 300) logConsole.removeChild(logConsole.firstChild);
+      }
+    } catch (parseErr) {
+      console.warn('Log parse error:', parseErr);
+    }
+  };
+  evtSource.onerror = (err) => {
+    console.warn('SSE notification:', err);
+  };
+} catch (e) {
+  console.warn('EventSource setup error:', e);
+}
 
 // ── Init & auto-refresh ────────────────────────────────────────────────────────
 loadPatients();

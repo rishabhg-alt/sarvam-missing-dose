@@ -37,9 +37,37 @@ def _get_db_path() -> Path:
 
 DB_PATH = _get_db_path()
 
+_db_initialized = False
+
 def _conn():
-    c = sqlite3.connect(DB_PATH)
+    global _db_initialized
+    c = sqlite3.connect(DB_PATH, check_same_thread=False)
     c.row_factory = sqlite3.Row
+    if not _db_initialized:
+        _db_initialized = True
+        c.execute("""
+            CREATE TABLE IF NOT EXISTS checkins (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                patient_id TEXT NOT NULL,
+                patient_name TEXT NOT NULL,
+                timestamp TEXT NOT NULL,
+                report_json TEXT NOT NULL,
+                escalated INTEGER NOT NULL DEFAULT 0
+            )
+        """)
+        c.execute("""
+            CREATE TABLE IF NOT EXISTS escalations (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                patient_id TEXT NOT NULL,
+                patient_name TEXT NOT NULL,
+                timestamp TEXT NOT NULL,
+                triggers_json TEXT NOT NULL,
+                coordinator_email TEXT NOT NULL,
+                coordinator_phone TEXT NOT NULL,
+                report_json TEXT NOT NULL
+            )
+        """)
+        c.commit()
     return c
 
 def init_db():

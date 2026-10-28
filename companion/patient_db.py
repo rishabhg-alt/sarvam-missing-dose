@@ -16,9 +16,13 @@ def load_patients():
     _patients = {p["id"]: p for p in data}
 
 def get_patient(patient_id: str) -> Optional[dict]:
+    if not _patients:
+        load_patients()
     return _patients.get(patient_id)
 
 def get_all_patients() -> list:
+    if not _patients:
+        load_patients()
     return list(_patients.values())
 
 def record_checkin(patient_id: str, checkin_data: dict):
