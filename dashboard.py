@@ -261,16 +261,23 @@ def api_trigger_checkin(patient_id: str):
     return {"status": "started", "patient_id": patient_id}
 
 
+_audio_cache: dict[str, bytes] = {}
+
 @app.get("/api/speak")
 def api_speak(text: str, lang: str = "hi-IN", role: str = "agent"):
-    """Synthesizes text to speech using Sarvam Bulbul and returns WAV audio."""
+    """Synthesizes text to speech using Sarvam Bulbul and returns WAV audio (with in-memory cache)."""
     from companion import tts
     from companion.config import VOICE_MAP, PATIENT_VOICE_MAP
     from fastapi.responses import Response
 
+    cache_key = f"{role}:{lang}:{text}"
+    if cache_key in _audio_cache:
+        return Response(content=_audio_cache[cache_key], media_type="audio/wav")
+
     speaker = VOICE_MAP.get(lang, "ritu") if role == "agent" else PATIENT_VOICE_MAP.get(lang, "shubh")
     try:
         audio = tts.speak(text, lang, speaker=speaker)
+        _audio_cache[cache_key] = audio
         return Response(content=audio, media_type="audio/wav")
     except Exception as e:
         return JSONResponse({"error": str(e)}, status_code=500)
@@ -419,6 +426,11 @@ DASHBOARD_HTML = """<!DOCTYPE html>
   /* Pulsing live dot */
   .live-dot { width: 10px; height: 10px; background: #10b981; border-radius: 50%; display: inline-block; animation: pulse 1.5s infinite; }
   @keyframes pulse { 0% { transform: scale(0.95); box-shadow: 0 0 0 0 rgba(16, 185, 129, 0.7); } 70% { transform: scale(1); box-shadow: 0 0 0 8px rgba(16, 185, 129, 0); } 100% { transform: scale(0.95); box-shadow: 0 0 0 0 rgba(16, 185, 129, 0); } }
+
+  /* Real-time word streaming cursor */
+  .typing-cursor { display: inline-block; color: #4f46e5; font-weight: 800; margin-left: 2px; animation: blink 0.75s infinite; }
+  .bubble-wrap.patient .typing-cursor { color: #059669; }
+  @keyframes blink { 0%, 100% { opacity: 1; } 50% { opacity: 0; } }
 </style>
 </head>
 <body>
@@ -668,9 +680,9 @@ async function triggerCheckin(patientId) {
   }, 3000);
 }
 
-// ── Audio Engine ───────────────────────────────────────────────────────────────
-let audioQueue = [];
-let isPlayingAudio = false;
+// ── Audio & Dynamic Word Streaming Engine ────────────────────────────────────
+let turnQueue = [];
+let isPlayingTurn = false;
 let audioEnabled = true;
 let audioUnlocked = false;
 
@@ -682,8 +694,8 @@ function toggleAudio() {
     btn.style.background = audioEnabled ? '#e0e7ff' : '#fee2e2';
     btn.style.color = audioEnabled ? '#4338ca' : '#dc2626';
   }
-  if (audioEnabled && !isPlayingAudio && audioQueue.length) {
-    playNextAudio();
+  if (audioEnabled && !isPlayingTurn && turnQueue.length) {
+    playNextTurn();
   }
 }
 
@@ -696,42 +708,171 @@ function unlockAudio() {
   }
 }
 
-function enqueueAudio(turn) {
-  audioQueue.push(turn);
-  if (!isPlayingAudio && audioEnabled) {
-    playNextAudio();
+function enqueueTurn(turn) {
+  // Pre-load audio IMMEDIATELY so it is cached in the browser before playback time
+  const audioUrl = '/api/speak?role=' + turn.role + '&lang=' + encodeURIComponent(turn.lang) + '&text=' + encodeURIComponent(turn.text);
+  const preloaded = new Audio(audioUrl);
+  preloaded.preload = "auto";
+  preloaded.load();
+  turn.audioObj = preloaded;
+
+  turnQueue.push(turn);
+  if (!isPlayingTurn) {
+    playNextTurn();
   }
 }
 
-function playNextAudio() {
-  if (!audioEnabled || !audioQueue.length) {
-    isPlayingAudio = false;
+function createSpeechBubbleSkeleton(role, speaker, lang, fullText) {
+  const transcript = document.getElementById('call-transcript');
+  if (!transcript) return null;
+  const empty = document.getElementById('transcript-empty');
+  if (empty) empty.remove();
+
+  const wrap = document.createElement('div');
+  wrap.className = 'bubble-wrap ' + (role === 'agent' ? 'agent' : 'patient');
+
+  const sender = document.createElement('div');
+  sender.className = 'bubble-sender';
+  sender.innerHTML = (role === 'agent' ? '🤖 ' : '👤 ') + speaker;
+
+  const card = document.createElement('div');
+  card.className = 'bubble-card';
+  card.textContent = ''; // starts empty for dynamic word streaming
+
+  const action = document.createElement('div');
+  action.className = 'bubble-action';
+  action.style.display = 'none'; // revealed once turn finishes speaking
+
+  const playBtn = document.createElement('button');
+  playBtn.className = 'play-turn-btn';
+  playBtn.innerHTML = '🔊 Replay Audio';
+  playBtn.onclick = () => playSingleTurn(role, lang, fullText);
+  action.appendChild(playBtn);
+
+  wrap.appendChild(sender);
+  wrap.appendChild(card);
+  wrap.appendChild(action);
+
+  transcript.appendChild(wrap);
+  window.scrollTo({ top: document.body.scrollHeight, behavior: 'smooth' });
+
+  return { wrap, card, action };
+}
+
+function playNextTurn() {
+  if (!turnQueue.length) {
+    isPlayingTurn = false;
     const ind = document.getElementById('audio-playing-indicator');
     if (ind) ind.style.display = 'none';
     return;
   }
-  isPlayingAudio = true;
-  const turn = audioQueue.shift();
+
+  isPlayingTurn = true;
+  const turn = turnQueue.shift();
+
+  // Create speech bubble in the UI with empty text and cursor
+  const bubbleElements = createSpeechBubbleSkeleton(turn.role, turn.speaker, turn.lang, turn.text);
+
   const ind = document.getElementById('audio-playing-indicator');
   const indText = document.getElementById('audio-speaking-text');
   if (ind && indText) {
     ind.style.display = 'flex';
-    indText.textContent = (turn.role === 'agent' ? '🤖 Clinic Assistant' : '👤 Patient') + ': "' + turn.text.substring(0, 45) + '..."';
+    indText.textContent = (turn.role === 'agent' ? '🤖 Clinic Assistant' : '👤 Patient') + ' is speaking…';
   }
 
-  const audioUrl = '/api/speak?role=' + turn.role + '&lang=' + encodeURIComponent(turn.lang) + '&text=' + encodeURIComponent(turn.text);
-  const audio = new Audio(audioUrl);
-  audio.onended = () => {
-    setTimeout(playNextAudio, 500); // Natural 500ms conversational pause
-  };
-  audio.onerror = (err) => {
-    console.warn('Audio synthesis error:', err);
-    setTimeout(playNextAudio, 200);
-  };
-  audio.play().catch(e => {
-    console.warn('Autoplay prevented:', e);
-    setTimeout(playNextAudio, 200);
-  });
+  const audio = turn.audioObj || new Audio('/api/speak?role=' + turn.role + '&lang=' + encodeURIComponent(turn.lang) + '&text=' + encodeURIComponent(turn.text));
+  let audioStarted = false;
+  let wordStreamTimer = null;
+
+  function startWordStreaming(durationSec) {
+    const words = turn.text.split(' ');
+    // Estimate cadence based on audio duration or fallback to 220ms per word
+    const totalDurationMs = (durationSec && durationSec > 0.5) ? (durationSec * 1000) : (words.length * 220);
+    const msPerWord = Math.max(90, Math.floor(totalDurationMs / words.length));
+
+    let wordIdx = 0;
+    if (bubbleElements && bubbleElements.card) {
+      bubbleElements.card.textContent = '';
+      const cursor = document.createElement('span');
+      cursor.className = 'typing-cursor';
+      cursor.textContent = ' ▌';
+      bubbleElements.card.appendChild(cursor);
+
+      wordStreamTimer = setInterval(() => {
+        if (wordIdx < words.length) {
+          const wordText = (wordIdx > 0 ? ' ' : '') + words[wordIdx];
+          cursor.before(wordText);
+          wordIdx++;
+          window.scrollTo({ top: document.body.scrollHeight, behavior: 'smooth' });
+        } else {
+          clearInterval(wordStreamTimer);
+          cursor.remove();
+          bubbleElements.card.textContent = turn.text;
+        }
+      }, msPerWord);
+    }
+  }
+
+  function advanceToNextTurn() {
+    if (wordStreamTimer) clearInterval(wordStreamTimer);
+    if (bubbleElements) {
+      if (bubbleElements.card) bubbleElements.card.textContent = turn.text;
+      if (bubbleElements.action) bubbleElements.action.style.display = 'flex';
+    }
+    // Minimal gap of only 80ms before next speaker starts talking
+    setTimeout(playNextTurn, 80);
+  }
+
+  if (audioEnabled) {
+    audio.onloadedmetadata = () => {
+      if (!audioStarted) {
+        audioStarted = true;
+        startWordStreaming(audio.duration);
+      }
+    };
+
+    audio.onplay = () => {
+      if (!audioStarted) {
+        audioStarted = true;
+        startWordStreaming(audio.duration || (turn.text.split(' ').length * 0.22));
+      }
+    };
+
+    audio.onended = () => {
+      advanceToNextTurn();
+    };
+
+    audio.onerror = (e) => {
+      console.warn('Audio playback issue, streaming words visually:', e);
+      if (!audioStarted) {
+        audioStarted = true;
+        startWordStreaming(turn.text.split(' ').length * 0.22);
+      }
+      setTimeout(advanceToNextTurn, (turn.text.split(' ').length * 220) + 100);
+    };
+
+    audio.play().catch(e => {
+      console.warn('Autoplay prevented, streaming words visually:', e);
+      if (!audioStarted) {
+        audioStarted = true;
+        startWordStreaming(turn.text.split(' ').length * 0.22);
+      }
+      setTimeout(advanceToNextTurn, (turn.text.split(' ').length * 220) + 100);
+    });
+
+    // Safety fallback: ensure word streaming starts if onloadedmetadata is delayed
+    setTimeout(() => {
+      if (!audioStarted) {
+        audioStarted = true;
+        startWordStreaming(audio.duration || (turn.text.split(' ').length * 0.22));
+      }
+    }, 350);
+
+  } else {
+    // Muted mode: stream words visually at natural cadence
+    startWordStreaming(turn.text.split(' ').length * 0.22);
+    setTimeout(advanceToNextTurn, (turn.text.split(' ').length * 220) + 100);
+  }
 }
 
 function playSingleTurn(role, lang, text) {
@@ -750,41 +891,8 @@ function clearLiveCall() {
   if (banner) banner.style.display = 'none';
   const ind = document.getElementById('audio-playing-indicator');
   if (ind) ind.style.display = 'none';
-  audioQueue = [];
-  isPlayingAudio = false;
-}
-
-function appendSpeechBubble(role, speaker, text, lang) {
-  const transcript = document.getElementById('call-transcript');
-  if (!transcript) return;
-  const empty = document.getElementById('transcript-empty');
-  if (empty) empty.remove();
-
-  const wrap = document.createElement('div');
-  wrap.className = 'bubble-wrap ' + (role === 'agent' ? 'agent' : 'patient');
-
-  const sender = document.createElement('div');
-  sender.className = 'bubble-sender';
-  sender.innerHTML = (role === 'agent' ? '🤖 ' : '👤 ') + speaker;
-
-  const card = document.createElement('div');
-  card.className = 'bubble-card';
-  card.textContent = text;
-
-  const action = document.createElement('div');
-  action.className = 'bubble-action';
-  const playBtn = document.createElement('button');
-  playBtn.className = 'play-turn-btn';
-  playBtn.innerHTML = '🔊 Replay Audio';
-  playBtn.onclick = () => playSingleTurn(role, lang, text);
-  action.appendChild(playBtn);
-
-  wrap.appendChild(sender);
-  wrap.appendChild(card);
-  wrap.appendChild(action);
-
-  transcript.appendChild(wrap);
-  window.scrollTo({ top: document.body.scrollHeight, behavior: 'smooth' });
+  turnQueue = [];
+  isPlayingTurn = false;
 }
 
 // ── History modal ─────────────────────────────────────────────────────────────
@@ -894,8 +1002,7 @@ try {
           if (pDetails) pDetails.textContent = 'Language: ' + (LANG_NAMES[parsed.language] || parsed.language) + ' · Phone: ' + parsed.phone;
           if (pBadge) pBadge.textContent = 'Connected (Live)';
         } else if (parsed.type === 'turn') {
-          appendSpeechBubble(parsed.role, parsed.speaker, parsed.text, parsed.lang);
-          enqueueAudio(parsed);
+          enqueueTurn(parsed);
         } else if (parsed.type === 'call_end') {
           const pBadge = document.getElementById('call-status-badge');
           if (pBadge) {
