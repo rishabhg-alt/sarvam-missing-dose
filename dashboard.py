@@ -333,223 +333,755 @@ DASHBOARD_HTML = """<!DOCTYPE html>
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
-<title>Missed-Dose Companion</title>
+<title>Missed-Dose & Follow-Up Companion · Clinical Voice AI</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Plus+Jakarta+Sans:wght@400;500;600;700;800&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet">
 <style>
+  :root {
+    --bg-page: #0b0f19;
+    --bg-card: #131b2e;
+    --bg-card-hover: #18223a;
+    --border-color: rgba(255, 255, 255, 0.08);
+    --border-highlight: rgba(99, 102, 241, 0.3);
+    --primary: #6366f1;
+    --primary-light: #818cf8;
+    --primary-glow: rgba(99, 102, 241, 0.25);
+    --emerald: #10b981;
+    --emerald-light: #34d399;
+    --emerald-glow: rgba(16, 185, 129, 0.2);
+    --rose: #f43f5e;
+    --rose-glow: rgba(244, 63, 94, 0.2);
+    --amber: #f59e0b;
+    --text-primary: #f8fafc;
+    --text-secondary: #94a3b8;
+    --text-muted: #64748b;
+  }
+
   * { box-sizing: border-box; margin: 0; padding: 0; }
-  body { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
-         background: #f5f7fa; color: #1a1a2e; min-height: 100vh; }
-  header { background: #1a1a2e; color: white; padding: 16px 32px;
-           display: flex; align-items: center; gap: 12px; }
-  header h1 { font-size: 1.2rem; font-weight: 600; }
-  header span { font-size: 1.5rem; }
-  .subtitle { font-size: 0.8rem; color: #8888aa; margin-top: 2px; }
+  body {
+    font-family: 'Plus Jakarta Sans', -apple-system, BlinkMacSystemFont, sans-serif;
+    background: var(--bg-page);
+    color: var(--text-primary);
+    min-height: 100vh;
+    line-height: 1.5;
+    background-image: 
+      radial-gradient(at 0% 0%, rgba(99, 102, 241, 0.12) 0px, transparent 50%),
+      radial-gradient(at 100% 100%, rgba(16, 185, 129, 0.08) 0px, transparent 50%);
+    background-attachment: fixed;
+  }
 
-  nav { display: flex; gap: 0; background: white; border-bottom: 1px solid #e0e0ef; padding: 0 32px; }
-  nav button { padding: 12px 20px; border: none; background: none; cursor: pointer;
-               font-size: 0.9rem; color: #666; border-bottom: 3px solid transparent;
-               transition: all 0.15s; }
-  nav button.active { color: #1a1a2e; border-bottom-color: #6c63ff; font-weight: 600; }
-  nav button:hover:not(.active) { color: #1a1a2e; background: #f5f7fa; }
+  /* ── Header ── */
+  header {
+    background: rgba(15, 23, 42, 0.75);
+    backdrop-filter: blur(16px);
+    border-bottom: 1px solid var(--border-color);
+    padding: 16px 36px;
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    position: sticky;
+    top: 0;
+    z-index: 50;
+  }
+  .brand-group { display: flex; align-items: center; gap: 14px; }
+  .brand-icon {
+    width: 44px; height: 44px;
+    background: linear-gradient(135deg, #6366f1, #3b82f6);
+    border-radius: 12px;
+    display: flex; align-items: center; justify-content: center;
+    font-size: 1.4rem;
+    box-shadow: 0 4px 14px var(--primary-glow);
+  }
+  header h1 {
+    font-size: 1.15rem;
+    font-weight: 800;
+    letter-spacing: -0.02em;
+    background: linear-gradient(to right, #ffffff, #cbd5e1);
+    -webkit-background-clip: text;
+    -webkit-text-fill-color: transparent;
+  }
+  .brand-subtitle {
+    font-size: 0.78rem;
+    color: var(--text-secondary);
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    margin-top: 1px;
+  }
+  .model-pill {
+    background: rgba(99, 102, 241, 0.15);
+    color: var(--primary-light);
+    border: 1px solid rgba(99, 102, 241, 0.3);
+    padding: 1px 7px;
+    border-radius: 99px;
+    font-size: 0.7rem;
+    font-weight: 600;
+  }
+  .header-status {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    background: rgba(16, 185, 129, 0.1);
+    border: 1px solid rgba(16, 185, 129, 0.25);
+    color: var(--emerald-light);
+    padding: 6px 14px;
+    border-radius: 99px;
+    font-size: 0.76rem;
+    font-weight: 600;
+  }
+  .status-dot {
+    width: 8px; height: 8px;
+    background: var(--emerald);
+    border-radius: 50%;
+    box-shadow: 0 0 10px var(--emerald);
+    animation: pulse-dot 2s infinite;
+  }
+  @keyframes pulse-dot {
+    0% { transform: scale(0.9); opacity: 0.8; }
+    50% { transform: scale(1.2); opacity: 1; }
+    100% { transform: scale(0.9); opacity: 0.8; }
+  }
 
-  main { padding: 32px; max-width: 1200px; margin: 0 auto; }
+  /* ── Navigation ── */
+  nav {
+    display: flex;
+    gap: 8px;
+    background: rgba(15, 23, 42, 0.4);
+    border-bottom: 1px solid var(--border-color);
+    padding: 8px 36px;
+  }
+  nav button {
+    padding: 10px 18px;
+    border: none;
+    background: transparent;
+    color: var(--text-secondary);
+    border-radius: 8px;
+    cursor: pointer;
+    font-size: 0.86rem;
+    font-weight: 600;
+    transition: all 0.2s cubic-bezier(0.16, 1, 0.3, 1);
+    display: flex;
+    align-items: center;
+    gap: 8px;
+  }
+  nav button:hover {
+    color: white;
+    background: rgba(255, 255, 255, 0.05);
+  }
+  nav button.active {
+    color: white;
+    background: var(--primary);
+    box-shadow: 0 2px 10px var(--primary-glow);
+  }
+
+  main {
+    padding: 32px 36px;
+    max-width: 1280px;
+    margin: 0 auto;
+  }
   section { display: none; }
-  section.active { display: block; }
+  section.active { display: block; animation: fadein 0.25s ease-out; }
 
-  h2 { font-size: 1.1rem; font-weight: 600; margin-bottom: 20px; color: #1a1a2e; }
+  @keyframes fadein {
+    from { opacity: 0; transform: translateY(6px); }
+    to { opacity: 1; transform: translateY(0); }
+  }
 
-  /* Patient grid */
-  .patients-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(340px, 1fr)); gap: 16px; }
-  .patient-card { background: white; border-radius: 12px; padding: 20px;
-                  box-shadow: 0 1px 4px rgba(0,0,0,0.08); border: 1px solid #eee; }
-  .patient-card .name { font-weight: 700; font-size: 1rem; margin-bottom: 4px; }
-  .patient-card .meta { font-size: 0.8rem; color: #888; margin-bottom: 12px; }
-  .badge { display: inline-block; padding: 2px 8px; border-radius: 99px; font-size: 0.72rem;
-           font-weight: 600; margin-right: 4px; }
-  .badge.lang { background: #ede9fe; color: #6c63ff; }
-  .badge.ok { background: #d1fae5; color: #059669; }
-  .badge.alert { background: #fee2e2; color: #dc2626; }
-  .badge.running { background: #fef3c7; color: #d97706; }
-  .meds { font-size: 0.8rem; color: #555; margin: 10px 0; line-height: 1.6; }
-  .meds strong { color: #333; display: block; margin-bottom: 2px; }
-  .last-checkin { font-size: 0.76rem; color: #aaa; margin-top: 10px; }
-  .btn { padding: 8px 16px; border: none; border-radius: 8px; cursor: pointer;
-         font-size: 0.85rem; font-weight: 600; transition: all 0.15s; }
-  .btn-primary { background: #6c63ff; color: white; }
-  .btn-primary:hover { background: #5a52e0; }
-  .btn-primary:disabled { background: #c4c4c4; cursor: not-allowed; }
-  .btn-sm { padding: 5px 12px; font-size: 0.78rem; }
-  .card-footer { display: flex; justify-content: space-between; align-items: center; margin-top: 14px; }
+  /* ── Stats Overview ── */
+  .stats-grid {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(240px, 1fr));
+    gap: 16px;
+    margin-bottom: 28px;
+  }
+  .stat-card {
+    background: var(--bg-card);
+    border: 1px solid var(--border-color);
+    border-radius: 14px;
+    padding: 20px 24px;
+    position: relative;
+    overflow: hidden;
+    transition: transform 0.2s, border-color 0.2s;
+  }
+  .stat-card:hover {
+    transform: translateY(-2px);
+    border-color: rgba(255, 255, 255, 0.15);
+  }
+  .stat-card::before {
+    content: '';
+    position: absolute;
+    top: 0; left: 0; right: 0;
+    height: 3px;
+  }
+  .stat-card.blue::before { background: linear-gradient(90deg, #6366f1, #3b82f6); }
+  .stat-card.green::before { background: linear-gradient(90deg, #10b981, #059669); }
+  .stat-card.red::before { background: linear-gradient(90deg, #f43f5e, #e11d48); }
+  .stat-card.purple::before { background: linear-gradient(90deg, #a855f7, #6366f1); }
+  .stat-card .num {
+    font-size: 2.2rem;
+    font-weight: 800;
+    letter-spacing: -0.03em;
+    line-height: 1;
+    margin-bottom: 6px;
+  }
+  .stat-card.blue .num { color: #818cf8; }
+  .stat-card.green .num { color: #34d399; }
+  .stat-card.red .num { color: #fb7185; }
+  .stat-card.purple .num { color: #c084fc; }
+  .stat-card .lbl {
+    font-size: 0.8rem;
+    font-weight: 600;
+    color: var(--text-secondary);
+    text-transform: uppercase;
+    letter-spacing: 0.04em;
+  }
 
-  /* Table */
-  table { width: 100%; border-collapse: collapse; background: white;
-          border-radius: 12px; overflow: hidden; box-shadow: 0 1px 4px rgba(0,0,0,0.08); }
-  th { text-align: left; padding: 12px 16px; font-size: 0.78rem; font-weight: 600;
-       color: #888; background: #fafafa; border-bottom: 1px solid #eee; text-transform: uppercase; letter-spacing: 0.05em; }
-  td { padding: 12px 16px; font-size: 0.85rem; border-bottom: 1px solid #f0f0f0; vertical-align: top; }
-  tr:last-child td { border-bottom: none; }
-  tr:hover td { background: #fafbff; }
+  /* ── Patient Grid ── */
+  .section-header {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    margin-bottom: 20px;
+  }
+  .section-title {
+    font-size: 1.15rem;
+    font-weight: 700;
+    letter-spacing: -0.01em;
+  }
+  .patients-grid {
+    display: grid;
+    grid-template-columns: repeat(auto-fill, minmax(360px, 1fr));
+    gap: 20px;
+  }
+  .patient-card {
+    background: var(--bg-card);
+    border: 1px solid var(--border-color);
+    border-radius: 16px;
+    padding: 24px;
+    display: flex;
+    flex-direction: column;
+    justify-content: space-between;
+    transition: all 0.25s cubic-bezier(0.16, 1, 0.3, 1);
+    position: relative;
+  }
+  .patient-card:hover {
+    background: var(--bg-card-hover);
+    border-color: var(--border-highlight);
+    box-shadow: 0 12px 30px -10px rgba(0, 0, 0, 0.5);
+    transform: translateY(-2px);
+  }
+  .card-top {
+    display: flex;
+    justify-content: space-between;
+    align-items: flex-start;
+    margin-bottom: 16px;
+  }
+  .patient-identity {
+    display: flex;
+    align-items: center;
+    gap: 12px;
+  }
+  .patient-avatar {
+    width: 44px; height: 44px;
+    border-radius: 12px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    font-weight: 800;
+    font-size: 1.05rem;
+    color: white;
+  }
+  .patient-avatar.male {
+    background: linear-gradient(135deg, #3b82f6, #1d4ed8);
+    box-shadow: 0 4px 12px rgba(59, 130, 246, 0.3);
+  }
+  .patient-avatar.female {
+    background: linear-gradient(135deg, #ec4899, #be185d);
+    box-shadow: 0 4px 12px rgba(236, 72, 153, 0.3);
+  }
+  .patient-name-block .name {
+    font-weight: 700;
+    font-size: 1.05rem;
+    color: #f1f5f9;
+  }
+  .patient-name-block .meta {
+    font-size: 0.78rem;
+    color: var(--text-muted);
+  }
 
-  /* Log console */
-  #log-console { background: #1a1a2e; color: #a8ff78; font-family: 'SF Mono', 'Fira Code', monospace;
-                 font-size: 0.8rem; padding: 20px; border-radius: 12px; height: 400px;
-                 overflow-y: auto; line-height: 1.8; white-space: pre-wrap; }
-  #log-console .log-line { animation: fadein 0.2s ease; }
-  @keyframes fadein { from { opacity: 0; transform: translateY(4px); } to { opacity: 1; } }
+  .badge-row { display: flex; flex-wrap: wrap; gap: 6px; margin-bottom: 14px; }
+  .chip {
+    padding: 3px 9px;
+    border-radius: 6px;
+    font-size: 0.72rem;
+    font-weight: 600;
+    display: inline-flex;
+    align-items: center;
+    gap: 5px;
+  }
+  .chip.lang { background: rgba(99, 102, 241, 0.15); color: #a5b4fc; border: 1px solid rgba(99, 102, 241, 0.3); }
+  .chip.ok { background: rgba(16, 185, 129, 0.15); color: #6ee7b7; border: 1px solid rgba(16, 185, 129, 0.3); }
+  .chip.alert { background: rgba(244, 63, 94, 0.15); color: #fda4af; border: 1px solid rgba(244, 63, 94, 0.3); }
+  .chip.running { background: rgba(245, 158, 11, 0.15); color: #fcd34d; border: 1px solid rgba(245, 158, 11, 0.3); }
 
-  /* Report modal */
-  .modal-overlay { display: none; position: fixed; inset: 0; background: rgba(0,0,0,0.5);
-                   z-index: 100; align-items: center; justify-content: center; }
-  .modal-overlay.open { display: flex; }
-  .modal { background: white; border-radius: 16px; padding: 28px; max-width: 600px;
-           width: 90%; max-height: 80vh; overflow-y: auto; position: relative; }
-  .modal h3 { font-size: 1rem; font-weight: 700; margin-bottom: 16px; }
-  .modal-close { position: absolute; top: 16px; right: 16px; border: none; background: none;
-                 font-size: 1.2rem; cursor: pointer; color: #888; }
-  .report-section { margin-bottom: 16px; }
-  .report-section label { font-size: 0.75rem; font-weight: 700; color: #888;
-                          text-transform: uppercase; letter-spacing: 0.05em; display: block; margin-bottom: 6px; }
-  .med-row { display: flex; justify-content: space-between; padding: 6px 10px;
-             border-radius: 6px; background: #f5f7fa; margin-bottom: 4px; font-size: 0.84rem; }
-  .med-status.taken { color: #059669; font-weight: 600; }
-  .med-status.missed { color: #dc2626; font-weight: 600; }
-  .med-status.partial { color: #d97706; font-weight: 600; }
-  .med-status.unknown { color: #888; }
-  .flag-list { display: flex; flex-wrap: wrap; gap: 6px; }
-  .symptom-tag { background: #fee2e2; color: #dc2626; border-radius: 99px;
-                 padding: 2px 10px; font-size: 0.78rem; }
-  .summary-box { background: #f0f4ff; border-radius: 8px; padding: 12px;
-                 font-size: 0.85rem; color: #444; line-height: 1.5; }
+  .meds-container {
+    background: rgba(15, 23, 42, 0.5);
+    border-radius: 10px;
+    padding: 12px 14px;
+    margin-bottom: 14px;
+    border: 1px solid rgba(255, 255, 255, 0.04);
+  }
+  .meds-header {
+    font-size: 0.72rem;
+    font-weight: 700;
+    text-transform: uppercase;
+    letter-spacing: 0.05em;
+    color: var(--text-muted);
+    margin-bottom: 6px;
+  }
+  .med-pill-item {
+    font-size: 0.8rem;
+    color: #cbd5e1;
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    margin-bottom: 4px;
+  }
+  .med-pill-item:last-child { margin-bottom: 0; }
+  .appointment-note {
+    font-size: 0.76rem;
+    color: var(--text-secondary);
+    margin-bottom: 16px;
+    display: flex;
+    align-items: center;
+    gap: 6px;
+  }
 
-  .empty { color: #aaa; font-size: 0.85rem; padding: 40px; text-align: center; }
-  .stats-row { display: flex; gap: 16px; margin-bottom: 24px; }
-  .stat-card { background: white; border-radius: 12px; padding: 16px 24px;
-               flex: 1; box-shadow: 0 1px 4px rgba(0,0,0,0.08); }
-  .stat-card .num { font-size: 2rem; font-weight: 700; color: #6c63ff; }
-  .stat-card .lbl { font-size: 0.8rem; color: #888; margin-top: 2px; }
+  .card-footer {
+    display: flex;
+    gap: 10px;
+    margin-top: auto;
+  }
+  .btn {
+    padding: 9px 18px;
+    border: none;
+    border-radius: 10px;
+    cursor: pointer;
+    font-size: 0.84rem;
+    font-weight: 600;
+    transition: all 0.2s cubic-bezier(0.16, 1, 0.3, 1);
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    gap: 6px;
+    text-decoration: none;
+  }
+  .btn-primary {
+    background: linear-gradient(135deg, #6366f1, #4f46e5);
+    color: white;
+    box-shadow: 0 4px 12px var(--primary-glow);
+    flex: 1;
+  }
+  .btn-primary:hover {
+    background: linear-gradient(135deg, #818cf8, #6366f1);
+    transform: translateY(-1px);
+    box-shadow: 0 6px 16px var(--primary-glow);
+  }
+  .btn-primary:disabled {
+    background: #334155;
+    color: #64748b;
+    box-shadow: none;
+    cursor: not-allowed;
+    transform: none;
+  }
+  .btn-secondary {
+    background: rgba(255, 255, 255, 0.06);
+    color: #cbd5e1;
+    border: 1px solid var(--border-color);
+  }
+  .btn-secondary:hover {
+    background: rgba(255, 255, 255, 0.1);
+    color: white;
+  }
+  .btn-sm { padding: 6px 12px; font-size: 0.78rem; border-radius: 8px; }
 
-  /* Interactive Call Bubbles */
-  .bubble-wrap { display: flex; flex-direction: column; max-width: 82%; animation: fadein 0.25s ease; margin-bottom: 12px; }
+  /* ── Live Call Session Hub ── */
+  .call-hub {
+    background: var(--bg-card);
+    border: 1px solid var(--border-color);
+    border-radius: 20px;
+    overflow: hidden;
+    margin-bottom: 24px;
+    box-shadow: 0 10px 40px -10px rgba(0, 0, 0, 0.6);
+  }
+  .hub-header {
+    background: rgba(15, 23, 42, 0.8);
+    border-bottom: 1px solid var(--border-color);
+    padding: 16px 24px;
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+  }
+  .caller-profile {
+    display: flex;
+    align-items: center;
+    gap: 14px;
+  }
+  .caller-avatar {
+    width: 48px; height: 48px;
+    background: linear-gradient(135deg, #6366f1, #3b82f6);
+    border-radius: 14px;
+    display: flex; align-items: center; justify-content: center;
+    font-size: 1.4rem;
+    box-shadow: 0 0 16px var(--primary-glow);
+  }
+  .caller-name {
+    font-size: 1.05rem;
+    font-weight: 700;
+    color: white;
+  }
+  .caller-details {
+    font-size: 0.78rem;
+    color: var(--text-secondary);
+  }
+
+  .soundwave-box {
+    display: flex;
+    align-items: center;
+    gap: 4px;
+    height: 24px;
+  }
+  .sound-bar {
+    width: 3px;
+    background: var(--primary-light);
+    border-radius: 3px;
+    animation: bounce 1.2s infinite ease-in-out;
+  }
+  .sound-bar:nth-child(1) { height: 6px; animation-delay: 0.1s; }
+  .sound-bar:nth-child(2) { height: 16px; animation-delay: 0.2s; }
+  .sound-bar:nth-child(3) { height: 22px; animation-delay: 0.3s; }
+  .sound-bar:nth-child(4) { height: 12px; animation-delay: 0.4s; }
+  .sound-bar:nth-child(5) { height: 8px; animation-delay: 0.5s; }
+  @keyframes bounce {
+    0%, 100% { transform: scaleY(0.4); opacity: 0.5; }
+    50% { transform: scaleY(1.2); opacity: 1; }
+  }
+
+  /* ── Interactive Speech Bubbles ── */
+  .hub-body {
+    padding: 24px;
+    min-height: 280px;
+    display: flex;
+    flex-direction: column;
+    gap: 16px;
+    background: radial-gradient(circle at 50% 10%, rgba(99, 102, 241, 0.04), transparent 60%);
+  }
+  .bubble-wrap {
+    display: flex;
+    flex-direction: column;
+    max-width: 80%;
+    animation: fadein 0.25s ease-out;
+  }
   .bubble-wrap.agent { align-self: flex-start; }
   .bubble-wrap.patient { align-self: flex-end; }
-  .bubble-sender { font-size: 0.74rem; font-weight: 700; margin-bottom: 4px; display: flex; align-items: center; gap: 6px; }
-  .bubble-wrap.agent .bubble-sender { color: #4f46e5; }
-  .bubble-wrap.patient .bubble-sender { justify-content: flex-end; color: #059669; }
-  .bubble-card { padding: 12px 16px; border-radius: 14px; font-size: 0.92rem; line-height: 1.5; box-shadow: 0 1px 3px rgba(0,0,0,0.06); }
-  .bubble-wrap.agent .bubble-card { background: white; border: 1px solid #e0e7ff; color: #1e1b4b; border-bottom-left-radius: 4px; }
-  .bubble-wrap.patient .bubble-card { background: #ecfdf5; border: 1px solid #a7f3d0; color: #064e3b; border-bottom-right-radius: 4px; }
-  .bubble-action { margin-top: 6px; display: flex; gap: 8px; font-size: 0.72rem; }
-  .bubble-wrap.patient .bubble-action { justify-content: flex-end; }
-  .play-turn-btn { background: none; border: 1px solid #cbd5e1; border-radius: 6px; padding: 2px 8px; font-size: 0.72rem; cursor: pointer; color: #475569; display: flex; align-items: center; gap: 4px; }
-  .play-turn-btn:hover { background: #f1f5f9; color: #0f172a; }
 
-  /* Pulsing live dot */
-  .live-dot { width: 10px; height: 10px; background: #10b981; border-radius: 50%; display: inline-block; animation: pulse 1.5s infinite; }
-  @keyframes pulse { 0% { transform: scale(0.95); box-shadow: 0 0 0 0 rgba(16, 185, 129, 0.7); } 70% { transform: scale(1); box-shadow: 0 0 0 8px rgba(16, 185, 129, 0); } 100% { transform: scale(0.95); box-shadow: 0 0 0 0 rgba(16, 185, 129, 0); } }
+  .bubble-speaker-tag {
+    font-size: 0.74rem;
+    font-weight: 700;
+    margin-bottom: 6px;
+    display: flex;
+    align-items: center;
+    gap: 6px;
+  }
+  .bubble-wrap.agent .bubble-speaker-tag { color: var(--primary-light); }
+  .bubble-wrap.patient .bubble-speaker-tag { color: var(--emerald-light); justify-content: flex-end; }
 
-  /* Real-time word streaming cursor */
-  .typing-cursor { display: inline-block; color: #4f46e5; font-weight: 800; margin-left: 2px; animation: blink 0.75s infinite; }
-  .bubble-wrap.patient .typing-cursor { color: #059669; }
+  .bubble-bubble {
+    padding: 14px 18px;
+    border-radius: 16px;
+    font-size: 0.94rem;
+    line-height: 1.6;
+    position: relative;
+    box-shadow: 0 4px 16px rgba(0, 0, 0, 0.2);
+  }
+  .bubble-wrap.agent .bubble-bubble {
+    background: #1e293b;
+    border: 1px solid rgba(99, 102, 241, 0.25);
+    color: #f1f5f9;
+    border-bottom-left-radius: 4px;
+  }
+  .bubble-wrap.patient .bubble-bubble {
+    background: rgba(16, 185, 129, 0.12);
+    border: 1px solid rgba(16, 185, 129, 0.35);
+    color: #e2e8f0;
+    border-bottom-right-radius: 4px;
+  }
+
+  .bubble-action-bar {
+    margin-top: 6px;
+    display: flex;
+    gap: 8px;
+  }
+  .bubble-wrap.patient .bubble-action-bar { justify-content: flex-end; }
+  .btn-replay-pill {
+    background: rgba(255, 255, 255, 0.05);
+    border: 1px solid var(--border-color);
+    color: var(--text-secondary);
+    padding: 3px 10px;
+    border-radius: 99px;
+    font-size: 0.72rem;
+    font-weight: 600;
+    cursor: pointer;
+    transition: all 0.15s;
+    display: inline-flex;
+    align-items: center;
+    gap: 4px;
+  }
+  .btn-replay-pill:hover {
+    background: rgba(255, 255, 255, 0.12);
+    color: white;
+  }
+
+  .typing-cursor {
+    display: inline-block;
+    color: var(--primary-light);
+    font-weight: 800;
+    margin-left: 3px;
+    animation: blink 0.7s infinite;
+  }
   @keyframes blink { 0%, 100% { opacity: 1; } 50% { opacity: 0; } }
+
+  /* ── Call Conclusion Banner ── */
+  .conclusion-banner {
+    background: linear-gradient(135deg, rgba(30, 41, 59, 0.9), rgba(15, 23, 42, 0.9));
+    border-radius: 16px;
+    padding: 20px 24px;
+    margin-top: 16px;
+    animation: fadein 0.35s ease-out;
+  }
+  .conclusion-banner.ok {
+    border: 1px solid rgba(16, 185, 129, 0.4);
+    box-shadow: 0 4px 20px rgba(16, 185, 129, 0.15);
+  }
+  .conclusion-banner.alert {
+    border: 1px solid rgba(244, 63, 94, 0.4);
+    box-shadow: 0 4px 20px rgba(244, 63, 94, 0.15);
+  }
+  .conclusion-title {
+    font-size: 1.05rem;
+    font-weight: 800;
+    margin-bottom: 8px;
+    display: flex;
+    align-items: center;
+    gap: 8px;
+  }
+  .conclusion-banner.ok .conclusion-title { color: var(--emerald-light); }
+  .conclusion-banner.alert .conclusion-title { color: #fb7185; }
+  .conclusion-body {
+    font-size: 0.88rem;
+    color: #cbd5e1;
+    margin-bottom: 14px;
+    line-height: 1.6;
+  }
+
+  /* ── Escalations Table ── */
+  .table-box {
+    background: var(--bg-card);
+    border: 1px solid var(--border-color);
+    border-radius: 16px;
+    overflow: hidden;
+  }
+  table { width: 100%; border-collapse: collapse; }
+  th {
+    background: rgba(15, 23, 42, 0.8);
+    color: var(--text-muted);
+    font-size: 0.74rem;
+    font-weight: 700;
+    text-transform: uppercase;
+    letter-spacing: 0.06em;
+    padding: 14px 20px;
+    text-align: left;
+    border-bottom: 1px solid var(--border-color);
+  }
+  td {
+    padding: 16px 20px;
+    font-size: 0.86rem;
+    border-bottom: 1px solid var(--border-color);
+    color: #cbd5e1;
+    vertical-align: middle;
+  }
+  tr:last-child td { border-bottom: none; }
+  tr:hover td { background: rgba(255, 255, 255, 0.02); }
+
+  /* ── Modal ── */
+  .modal-overlay {
+    display: none; position: fixed; inset: 0;
+    background: rgba(0, 0, 0, 0.7);
+    backdrop-filter: blur(8px);
+    z-index: 100;
+    align-items: center;
+    justify-content: center;
+  }
+  .modal-overlay.open { display: flex; }
+  .modal {
+    background: var(--bg-card);
+    border: 1px solid var(--border-highlight);
+    border-radius: 20px;
+    padding: 28px;
+    max-width: 620px;
+    width: 90%;
+    max-height: 85vh;
+    overflow-y: auto;
+    position: relative;
+    box-shadow: 0 20px 50px rgba(0, 0, 0, 0.8);
+  }
+  .modal h3 { font-size: 1.2rem; font-weight: 800; margin-bottom: 16px; color: white; }
+  .modal-close {
+    position: absolute; top: 20px; right: 20px;
+    background: rgba(255, 255, 255, 0.08);
+    border: none; color: #94a3b8; width: 32px; height: 32px;
+    border-radius: 50%; cursor: pointer; display: flex; align-items: center; justify-content: center;
+  }
+  .modal-close:hover { background: rgba(255, 255, 255, 0.15); color: white; }
+
+  /* ── Tech Console ── */
+  #log-console {
+    background: #090d16;
+    border: 1px solid var(--border-color);
+    color: #34d399;
+    font-family: 'JetBrains Mono', monospace;
+    font-size: 0.76rem;
+    padding: 16px;
+    border-radius: 12px;
+    height: 160px;
+    overflow-y: auto;
+    line-height: 1.7;
+  }
+
+  .empty-state {
+    padding: 60px 20px;
+    text-align: center;
+    color: var(--text-muted);
+    font-size: 0.9rem;
+  }
 </style>
 </head>
 <body>
 
 <header>
-  <span>🏥</span>
-  <div>
-    <h1>Missed-Dose & Follow-Up Companion</h1>
-    <div class="subtitle">Automated outbound voice check-ins · Sarvam AI</div>
+  <div class="brand-group">
+    <div class="brand-icon">🏥</div>
+    <div>
+      <h1>Missed-Dose & Follow-Up Companion</h1>
+      <div class="brand-subtitle">
+        AI Post-Discharge Rural Health Agent
+        <span class="model-pill">Sarvam 105B</span>
+        <span class="model-pill">Bulbul v3 TTS</span>
+      </div>
+    </div>
+  </div>
+  <div class="header-status">
+    <div class="status-dot"></div>
+    <span>Voice Engine Online</span>
   </div>
 </header>
 
 <nav>
-  <button id="nav-patients" class="active" onclick="showTab('patients')">👥 Patients</button>
-  <button id="nav-escalations" onclick="showTab('escalations')">🚨 Escalations</button>
-  <button id="nav-logs" onclick="showTab('logs')">🖥 Live Logs</button>
+  <button id="nav-patients" class="active" onclick="showTab('patients')">
+    <span>👥</span> Patient Roster
+  </button>
+  <button id="nav-logs" onclick="showTab('logs')">
+    <span>📞</span> Live Call Console
+  </button>
+  <button id="nav-escalations" onclick="showTab('escalations')">
+    <span>🚨</span> Clinical Escalations
+  </button>
 </nav>
 
 <main>
-
   <!-- Patients tab -->
   <section id="tab-patients" class="active">
-    <div class="stats-row" id="stats-row"></div>
-    <h2>Patient Registry</h2>
-    <div class="patients-grid" id="patient-grid">
-      <div class="empty">Loading patients…</div>
+    <div class="stats-grid" id="stats-row"></div>
+    <div class="section-header">
+      <h2 class="section-title">Enrolled Post-Discharge Patients</h2>
     </div>
+    <div class="patients-grid" id="patient-grid">
+      <div class="empty-state">Loading clinical records…</div>
+    </div>
+  </section>
+
+  <!-- Live Call Console tab -->
+  <section id="tab-logs">
+    <div class="call-hub">
+      <div class="hub-header">
+        <div class="caller-profile">
+          <div class="caller-avatar" id="call-avatar">📞</div>
+          <div>
+            <div class="caller-name" id="call-patient-name">Ready for Outbound Check-In</div>
+            <div class="caller-details" id="call-details">Select any patient from the roster to initiate an AI call in their native language</div>
+          </div>
+        </div>
+
+        <div style="display:flex; align-items:center; gap:12px">
+          <div class="soundwave-box" id="soundwave" style="display:none">
+            <div class="sound-bar"></div>
+            <div class="sound-bar"></div>
+            <div class="sound-bar"></div>
+            <div class="sound-bar"></div>
+            <div class="sound-bar"></div>
+          </div>
+
+          <button id="btn-audio-toggle" class="btn btn-sm" style="background:rgba(99, 102, 241, 0.2); color:#a5b4fc; border:1px solid rgba(99, 102, 241, 0.4)" onclick="toggleAudio()">
+            🔊 Voice Audio: ACTIVE
+          </button>
+          <button class="btn btn-sm btn-secondary" onclick="clearLiveCall()">
+            🗑 Clear
+          </button>
+        </div>
+      </div>
+
+      <!-- Persistent DOM Audio Channels -->
+      <audio id="call-audio" preload="auto" style="display:none"></audio>
+      <audio id="replay-audio" preload="auto" style="display:none"></audio>
+
+      <!-- Live Speech Stream -->
+      <div class="hub-body" id="call-transcript">
+        <div class="empty-state" id="transcript-empty">
+          Click <strong>📞 Start Native Call</strong> on any patient to connect live.<br>
+          The agent will verify medication doses, screen for worsening symptoms, and confirm clinical follow-ups.
+        </div>
+      </div>
+    </div>
+
+    <!-- Collapsible Diagnostics Console -->
+    <details style="background:var(--bg-card); border:1px solid var(--border-color); border-radius:14px; padding:12px 18px">
+      <summary style="font-size:0.78rem; font-weight:700; color:var(--text-muted); cursor:pointer">Technical & Escalation Telemetry</summary>
+      <div id="log-console" style="margin-top:10px">System standby.</div>
+    </details>
   </section>
 
   <!-- Escalations tab -->
   <section id="tab-escalations">
-    <h2>Escalation Log</h2>
-    <table>
-      <thead>
-        <tr>
-          <th>Time</th><th>Patient</th><th>Triggers</th><th>Coordinator</th><th>Summary</th><th></th>
-        </tr>
-      </thead>
-      <tbody id="escalation-tbody">
-        <tr><td colspan="6" class="empty">Loading…</td></tr>
-      </tbody>
-    </table>
+    <div class="section-header">
+      <h2 class="section-title">Clinical Triage & Escalation Register</h2>
+    </div>
+    <div class="table-box">
+      <table>
+        <thead>
+          <tr>
+            <th>Timestamp</th><th>Patient</th><th>Triggers Flagged</th><th>Coordinator Contact</th><th>Outcome Summary</th><th></th>
+          </tr>
+        </thead>
+        <tbody id="escalation-tbody">
+          <tr><td colspan="6" class="empty-state">Loading escalation logs…</td></tr>
+        </tbody>
+      </table>
+    </div>
   </section>
-
-  <!-- Logs tab -->
-  <section id="tab-logs">
-    <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:16px">
-      <h2>📞 Live Outbound Call Session</h2>
-      <div style="display:flex; gap:10px; align-items:center">
-        <button id="btn-audio-toggle" class="btn btn-sm" style="background:#e0e7ff; color:#4338ca" onclick="toggleAudio()">
-          🔊 Voice Audio: ON
-        </button>
-        <button class="btn btn-sm" style="background:#f3f4f6; color:#4b5563" onclick="clearLiveCall()">
-          🗑 Clear Transcript
-        </button>
-      </div>
-    </div>
-
-    <!-- Active Call Banner -->
-    <div id="call-banner" style="display:none; background:white; border-radius:12px; padding:16px 20px; border-left:5px solid #10b981; box-shadow:0 1px 4px rgba(0,0,0,0.06); margin-bottom:16px">
-      <div style="display:flex; justify-content:space-between; align-items:center">
-        <div>
-          <div style="font-weight:700; font-size:1rem" id="call-patient-name">Active Call: Ramesh Kumar</div>
-          <div style="font-size:0.8rem; color:#6b7280; margin-top:2px" id="call-details">Language: Hindi (hi-IN) · Phone: +919876543210</div>
-        </div>
-        <div style="display:flex; align-items:center; gap:8px">
-          <span class="live-dot"></span>
-          <span style="font-size:0.8rem; font-weight:600; color:#059669" id="call-status-badge">Call in Progress</span>
-        </div>
-      </div>
-    </div>
-
-    <!-- Audio Player Indicator -->
-    <div id="audio-playing-indicator" style="display:none; background:#ede9fe; color:#6d28d9; padding:8px 16px; border-radius:8px; font-size:0.82rem; font-weight:600; margin-bottom:14px; align-items:center; gap:8px">
-      <span>🔊 Speaking:</span>
-      <span id="audio-speaking-text" style="font-weight:400; font-style:italic">...</span>
-    </div>
-
-    <!-- Dedicated Persistent Audio Elements for Live Conversation and Replay -->
-    <audio id="call-audio" preload="auto" style="display:none"></audio>
-    <audio id="replay-audio" preload="auto" style="display:none"></audio>
-
-    <!-- Live Speech Bubbles -->
-    <div id="call-transcript" style="display:flex; flex-direction:column; margin-bottom:20px; min-height:120px">
-      <div class="empty" id="transcript-empty">
-        Ready for outbound call.<br>
-        Click <strong>📞 Check In</strong> on any patient to start a live voice conversation in their native language!
-      </div>
-    </div>
-
-    <!-- Raw Logs Collapsible -->
-    <details style="background:white; border-radius:10px; border:1px solid #e5e7eb; padding:12px">
-      <summary style="font-size:0.82rem; font-weight:600; color:#6b7280; cursor:pointer">Raw Technical & Escalation Logs</summary>
-      <div id="log-console" style="margin-top:10px; background:#1a1a2e; color:#a8ff78; font-family:'SF Mono',monospace; font-size:0.75rem; padding:12px; border-radius:8px; height:180px; overflow-y:auto; line-height:1.6; white-space:pre-wrap">Waiting for events…</div>
-    </details>
-  </section>
-
 </main>
 
-<!-- Report modal -->
+<!-- Detailed Report Modal -->
 <div class="modal-overlay" id="modal-overlay" onclick="closeModal(event)">
   <div class="modal" id="modal-content">
     <button class="modal-close" onclick="closeModal()">✕</button>
@@ -559,9 +1091,9 @@ DASHBOARD_HTML = """<!DOCTYPE html>
 
 <script>
 const LANG_NAMES = {
-  'hi-IN':'Hindi','ta-IN':'Tamil','te-IN':'Telugu','bn-IN':'Bengali',
-  'mr-IN':'Marathi','gu-IN':'Gujarati','kn-IN':'Kannada','ml-IN':'Malayalam',
-  'pa-IN':'Punjabi','en-IN':'English'
+  'hi-IN':'Hindi (हिन्दी)','ta-IN':'Tamil (தமிழ்)','te-IN':'Telugu (తెలుగు)','bn-IN':'Bengali (বাংলা)',
+  'mr-IN':'Marathi (मराठी)','gu-IN':'Gujarati (ગુજરાતી)','kn-IN':'Kannada (ಕನ್ನಡ)','ml-IN':'Malayalam (മലയാളം)',
+  'pa-IN':'Punjabi (ਪੰਜਾਬੀ)','en-IN':'English'
 };
 
 let patients = [];
@@ -569,27 +1101,20 @@ let escalations = [];
 
 // ── Tab switching ────────────────────────────────────────────────────────────
 function showTab(name) {
-  try {
-    document.querySelectorAll('section').forEach(s => s.classList.remove('active'));
-    document.querySelectorAll('nav button').forEach(b => b.classList.remove('active'));
-    
-    const targetSection = document.getElementById('tab-' + name);
-    if (targetSection) targetSection.classList.add('active');
-    
-    const targetBtn = document.getElementById('nav-' + name);
-    if (targetBtn) targetBtn.classList.add('active');
-    
-    if (name === 'escalations') {
-      loadEscalations();
-    } else if (name === 'patients') {
-      loadPatients();
-    }
-  } catch (err) {
-    console.error('Error switching tab:', err);
-  }
+  document.querySelectorAll('section').forEach(s => s.classList.remove('active'));
+  document.querySelectorAll('nav button').forEach(b => b.classList.remove('active'));
+  
+  const targetSection = document.getElementById('tab-' + name);
+  if (targetSection) targetSection.classList.add('active');
+  
+  const targetBtn = document.getElementById('nav-' + name);
+  if (targetBtn) targetBtn.classList.add('active');
+  
+  if (name === 'escalations') loadEscalations();
+  else if (name === 'patients') loadPatients();
 }
 
-// ── Patients ─────────────────────────────────────────────────────────────────
+// ── Patients Roster ──────────────────────────────────────────────────────────
 async function loadPatients() {
   const grid = document.getElementById('patient-grid');
   try {
@@ -599,9 +1124,8 @@ async function loadPatients() {
     renderStats();
     renderPatients();
   } catch (err) {
-    console.error('Failed to load patients:', err);
     if (grid && !patients.length) {
-      grid.innerHTML = '<div class="empty" style="color:#dc2626">Failed to load patients (' + err.message + '). <button class="btn btn-sm btn-primary" onclick="loadPatients()" style="margin-left:8px">Retry</button></div>';
+      grid.innerHTML = '<div class="empty-state" style="color:var(--rose)">Failed to connect to patient registry: ' + err.message + '</div>';
     }
   }
 }
@@ -613,9 +1137,22 @@ function renderStats() {
   const statsRow = document.getElementById('stats-row');
   if (statsRow) {
     statsRow.innerHTML = `
-      <div class="stat-card"><div class="num">${total}</div><div class="lbl">Total Patients</div></div>
-      <div class="stat-card"><div class="num">${checkedIn}</div><div class="lbl">Checked In</div></div>
-      <div class="stat-card"><div class="num" style="color:#dc2626">${escalated}</div><div class="lbl">Escalated (last call)</div></div>
+      <div class="stat-card blue">
+        <div class="num">${total}</div>
+        <div class="lbl">Enrolled Patients</div>
+      </div>
+      <div class="stat-card green">
+        <div class="num">${checkedIn}</div>
+        <div class="lbl">Check-Ins Completed</div>
+      </div>
+      <div class="stat-card red">
+        <div class="num">${escalated}</div>
+        <div class="lbl">Escalations Flagged</div>
+      </div>
+      <div class="stat-card purple">
+        <div class="num">3</div>
+        <div class="lbl">Native Languages</div>
+      </div>
     `;
   }
 }
@@ -623,34 +1160,58 @@ function renderStats() {
 function renderPatients() {
   const grid = document.getElementById('patient-grid');
   if (!grid) return;
-  if (!patients.length) { grid.innerHTML = '<div class="empty">No patients found in database.</div>'; return; }
+  if (!patients.length) { grid.innerHTML = '<div class="empty-state">No clinical records found.</div>'; return; }
+  
   grid.innerHTML = patients.map(p => {
     const lang = LANG_NAMES[p.language] || p.language;
-    const lastTime = p.last_checkin ? new Date(p.last_checkin).toLocaleString('en-IN') : 'Never';
-    const statusBadge = p.job_status === 'running'
-      ? '<span class="badge running">⏳ Running</span>'
+    const lastTime = p.last_checkin ? new Date(p.last_checkin).toLocaleString('en-IN') : 'None yet';
+    const isFemale = (p.gender || '').toLowerCase() === 'female';
+    const initials = p.name.split(' ').map(n => n[0]).join('').slice(0, 2);
+    
+    const statusChip = p.job_status === 'running'
+      ? '<span class="chip running">⏳ Calling…</span>'
       : p.last_escalated
-        ? '<span class="badge alert">🚨 Escalated</span>'
+        ? '<span class="chip alert">🚨 Escalated</span>'
         : p.total_checkins > 0
-          ? '<span class="badge ok">✅ OK</span>'
-          : '';
-    const meds = (p.medications || []).map(m => `<span>💊 ${m}</span>`).join('<br>');
+          ? '<span class="chip ok">✅ Routine Care</span>'
+          : '<span class="chip" style="background:rgba(255,255,255,0.06);color:#94a3b8">Pending 1st Check</span>';
+
+    const meds = (p.medications || []).map(m => `<div class="med-pill-item"><span>💊</span> ${m}</div>`).join('');
     const btnDisabled = p.job_status === 'running' ? 'disabled' : '';
+
     return `
     <div class="patient-card" id="card-${p.id}">
-      <div class="name">${p.name}</div>
-      <div class="meta">
-        <span class="badge lang">${lang}</span>
-        ${statusBadge}
+      <div>
+        <div class="card-top">
+          <div class="patient-identity">
+            <div class="patient-avatar ${isFemale ? 'female' : 'male'}">${initials}</div>
+            <div class="patient-name-block">
+              <div class="name">${p.name}</div>
+              <div class="meta">${isFemale ? '👩 Female' : '👨 Male'} · ${p.phone}</div>
+            </div>
+          </div>
+          <div>${statusChip}</div>
+        </div>
+
+        <div class="badge-row">
+          <span class="chip lang">🗣 ${lang}</span>
+        </div>
+
+        <div class="meds-container">
+          <div class="meds-header">Prescribed Regimen</div>
+          ${meds}
+        </div>
+
+        <div class="appointment-note">
+          <span>📅</span> Next Appointment: <strong>${p.next_appointment}</strong>
+        </div>
       </div>
-      <div class="meds"><strong>Medications</strong>${meds}</div>
-      <div class="meds"><strong>Next Appointment</strong>${p.next_appointment}</div>
-      <div class="last-checkin">Last check-in: ${lastTime} · ${p.total_checkins} total</div>
+
       <div class="card-footer">
-        <button class="btn btn-primary btn-sm" id="btn-${p.id}" onclick="triggerCheckin('${p.id}')" ${btnDisabled}>
-          📞 Check In
+        <button class="btn btn-primary" id="btn-${p.id}" onclick="triggerCheckin('${p.id}')" ${btnDisabled}>
+          📞 Start Native Call
         </button>
-        ${p.total_checkins > 0 ? `<button class="btn btn-sm" style="background:#f0f4ff;color:#6c63ff" onclick="showHistory('${p.id}')">📋 History</button>` : ''}
+        ${p.total_checkins > 0 ? `<button class="btn btn-secondary" onclick="showHistory('${p.id}')">📋 History</button>` : ''}
       </div>
     </div>`;
   }).join('');
@@ -661,26 +1222,20 @@ async function triggerCheckin(patientId) {
   const btn = document.getElementById('btn-' + patientId);
   if (btn) {
     btn.disabled = true;
-    btn.textContent = '⏳ Calling…';
+    btn.textContent = '⏳ Dialing…';
   }
 
-  // Switch to logs tab
   showTab('logs');
   clearLiveCall();
 
   const patient = patients.find(p => p.id === patientId);
   if (patient) {
-    const banner = document.getElementById('call-banner');
     const pName = document.getElementById('call-patient-name');
     const pDetails = document.getElementById('call-details');
-    const pBadge = document.getElementById('call-status-badge');
-    if (banner && pName && pDetails && pBadge) {
-      banner.style.display = 'block';
-      pName.textContent = 'Connecting Outbound Call: ' + patient.name;
-      const lang = LANG_NAMES[patient.language] || patient.language;
-      pDetails.textContent = 'Native Language: ' + lang + ' · Phone: ' + patient.phone;
-      pBadge.textContent = 'Dialing...';
-    }
+    const pAvatar = document.getElementById('call-avatar');
+    if (pName) pName.textContent = 'Connecting: ' + patient.name;
+    if (pDetails) pDetails.textContent = 'Native Language: ' + (LANG_NAMES[patient.language] || patient.language) + ' · Phone: ' + patient.phone;
+    if (pAvatar) pAvatar.textContent = (patient.gender === 'female' ? '👩' : '👨');
   }
 
   try {
@@ -689,7 +1244,6 @@ async function triggerCheckin(patientId) {
     console.error('Trigger checkin failed:', err);
   }
 
-  // Poll for completion
   const poll = setInterval(async () => {
     await loadPatients();
     const p = patients.find(x => x.id === patientId);
@@ -697,87 +1251,34 @@ async function triggerCheckin(patientId) {
       clearInterval(poll);
       if (btn) {
         btn.disabled = false;
-        btn.textContent = '📞 Check In';
+        btn.textContent = '📞 Start Native Call';
       }
     }
   }, 3000);
 }
 
-// ── Audio & Dynamic Word Streaming Engine ────────────────────────────────────
-let turnQueue = [];
-let isPlayingTurn = false;
+// ── Continuous Unified Audio Engine ──────────────────────────────────────────
 let audioEnabled = true;
 let audioUnlocked = false;
+let isPlayingTurn = false;
 let currentTurn = null;
-
-let callAudio = null;
-let replayAudio = null;
+let turnQueue = [];
+let pendingCallEnd = null;
 
 function getCallAudio() {
-  if (!callAudio) callAudio = document.getElementById('call-audio');
-  return callAudio;
+  return document.getElementById('call-audio');
 }
-
 function getReplayAudio() {
-  if (!replayAudio) replayAudio = document.getElementById('replay-audio');
-  return replayAudio;
+  return document.getElementById('replay-audio');
 }
 
 function updateAudioButton() {
   const btn = document.getElementById('btn-audio-toggle');
   if (btn) {
-    btn.innerHTML = audioEnabled ? '🔊 Voice Audio: ON' : '🔈 Voice Audio: MUTED';
-    btn.style.background = audioEnabled ? '#e0e7ff' : '#fee2e2';
-    btn.style.color = audioEnabled ? '#4338ca' : '#dc2626';
-  }
-}
-
-function toggleAudio() {
-  unlockAudio();
-  audioEnabled = !audioEnabled;
-  updateAudioButton();
-
-  const cAudio = getCallAudio();
-  const rAudio = getReplayAudio();
-
-  if (!audioEnabled) {
-    // Muting: immediately silence both audio channels
-    if (cAudio) {
-      cAudio.muted = true;
-      cAudio.volume = 0;
-    }
-    if (rAudio) {
-      rAudio.muted = true;
-      rAudio.volume = 0;
-    }
-  } else {
-    // Unmuting: immediately restore voice and guarantee sound on current speaker
-    if (cAudio) {
-      cAudio.muted = false;
-      cAudio.volume = 1.0;
-      if (isPlayingTurn && currentTurn) {
-        try {
-          const audioUrl = '/api/speak?role=' + currentTurn.role + '&lang=' + encodeURIComponent(currentTurn.lang) + '&speaker=' + encodeURIComponent(currentTurn.speaker_voice || '') + '&gender=' + encodeURIComponent(currentTurn.gender || 'female') + '&text=' + encodeURIComponent(currentTurn.text);
-          // If audio reached the end while muted or was not loaded, reload and play immediately!
-          if (cAudio.ended || cAudio.paused || isNaN(cAudio.duration) || cAudio.currentTime >= (cAudio.duration - 0.2)) {
-            cAudio.src = audioUrl;
-          }
-          cAudio.play().catch(e => console.warn('Unmute play error:', e));
-        } catch (err) {
-          console.warn('Error in unmute play:', err);
-        }
-      } else if (!isPlayingTurn && turnQueue.length) {
-        playNextTurn();
-      }
-    }
-
-    if (rAudio) {
-      rAudio.muted = false;
-      rAudio.volume = 1.0;
-      if (rAudio.paused && rAudio.src && !rAudio.ended) {
-        rAudio.play().catch(e => console.warn('Replay unmute error:', e));
-      }
-    }
+    btn.innerHTML = audioEnabled ? '🔊 Voice Audio: ACTIVE' : '🔈 Voice Audio: MUTED';
+    btn.style.background = audioEnabled ? 'rgba(99, 102, 241, 0.2)' : 'rgba(244, 63, 94, 0.2)';
+    btn.style.color = audioEnabled ? '#a5b4fc' : '#fda4af';
+    btn.style.borderColor = audioEnabled ? 'rgba(99, 102, 241, 0.4)' : 'rgba(244, 63, 94, 0.4)';
   }
 }
 
@@ -806,12 +1307,32 @@ function unlockAudio() {
   }
 }
 
+// Seamless Hardware Mute / Unmute (Continuously Playing in Background)
+function toggleAudio() {
+  unlockAudio();
+  audioEnabled = !audioEnabled;
+  updateAudioButton();
+
+  const cAudio = getCallAudio();
+  const rAudio = getReplayAudio();
+
+  // Volume & muted property toggle happens live without stopping or reloading!
+  if (cAudio) {
+    cAudio.muted = !audioEnabled;
+    cAudio.volume = audioEnabled ? 1.0 : 0.0;
+  }
+  if (rAudio) {
+    rAudio.muted = !audioEnabled;
+    rAudio.volume = audioEnabled ? 1.0 : 0.0;
+  }
+}
+
 function enqueueTurn(turn) {
-  // Pre-load audio into browser cache with exact speaker voice and gender
+  // Pre-load audio into browser cache
   const audioUrl = '/api/speak?role=' + turn.role + '&lang=' + encodeURIComponent(turn.lang) + '&speaker=' + encodeURIComponent(turn.speaker_voice || '') + '&gender=' + encodeURIComponent(turn.gender || 'female') + '&text=' + encodeURIComponent(turn.text);
-  const preloaded = new Audio(audioUrl);
-  preloaded.preload = "auto";
-  preloaded.load();
+  const pre = new Audio(audioUrl);
+  pre.preload = "auto";
+  pre.load();
 
   turnQueue.push(turn);
   if (!isPlayingTurn) {
@@ -819,7 +1340,7 @@ function enqueueTurn(turn) {
   }
 }
 
-function createSpeechBubbleSkeleton(role, speaker, lang, fullText, speakerVoice, gender) {
+function createSpeechBubble(role, speaker, lang, fullText, speakerVoice, gender) {
   const transcript = document.getElementById('call-transcript');
   if (!transcript) return null;
   const empty = document.getElementById('transcript-empty');
@@ -829,89 +1350,41 @@ function createSpeechBubbleSkeleton(role, speaker, lang, fullText, speakerVoice,
   wrap.className = 'bubble-wrap ' + (role === 'agent' ? 'agent' : 'patient');
 
   const sender = document.createElement('div');
-  sender.className = 'bubble-sender';
+  sender.className = 'bubble-speaker-tag';
   sender.innerHTML = (role === 'agent' ? '🤖 ' : '👤 ') + speaker;
 
-  const card = document.createElement('div');
-  card.className = 'bubble-card';
-  // Subtle initial loading placeholder until voice starts
-  card.innerHTML = '<span class="voice-loading" style="color:#9ca3af;font-size:0.85rem;font-style:italic">🔊 Connecting voice…</span>';
+  const bubble = document.createElement('div');
+  bubble.className = 'bubble-bubble';
+  bubble.innerHTML = '<span class="typing-cursor">▌</span>';
 
   const action = document.createElement('div');
-  action.className = 'bubble-action';
-  action.style.display = 'none'; // revealed once turn finishes speaking
+  action.className = 'bubble-action-bar';
+  action.style.display = 'none';
 
   const playBtn = document.createElement('button');
-  playBtn.className = 'play-turn-btn';
-  playBtn.innerHTML = '🔊 Replay Audio';
+  playBtn.className = 'btn-replay-pill';
+  playBtn.innerHTML = '🔊 Replay Voice';
   playBtn.onclick = () => playSingleTurn(role, lang, fullText, speakerVoice, gender);
   action.appendChild(playBtn);
 
   wrap.appendChild(sender);
-  wrap.appendChild(card);
+  wrap.appendChild(bubble);
   wrap.appendChild(action);
 
   transcript.appendChild(wrap);
   window.scrollTo({ top: document.body.scrollHeight, behavior: 'smooth' });
 
-  return { wrap, card, action };
-}
-
-let pendingCallEnd = null;
-
-function applyCallEnd(data) {
-  const pBadge = document.getElementById('call-status-badge');
-  if (pBadge) {
-    pBadge.textContent = data.escalated ? 'Call Ended · 🚨 Escalated' : 'Call Ended · ✅ Adherent';
-    pBadge.style.color = data.escalated ? '#dc2626' : '#059669';
-  }
-
-  const transcript = document.getElementById('call-transcript');
-  if (transcript && !document.getElementById('call-conclusion-card')) {
-    const summaryCard = document.createElement('div');
-    summaryCard.id = 'call-conclusion-card';
-    summaryCard.style.marginTop = '20px';
-    summaryCard.style.padding = '16px';
-    summaryCard.style.borderRadius = '12px';
-    summaryCard.style.background = data.escalated ? '#fff1f2' : '#f0fdf4';
-    summaryCard.style.border = '2px solid ' + (data.escalated ? '#fca5a5' : '#86efac');
-
-    const heading = document.createElement('div');
-    heading.style.fontWeight = '700';
-    heading.style.fontSize = '0.95rem';
-    heading.style.color = data.escalated ? '#991b1b' : '#166534';
-    heading.style.marginBottom = '6px';
-    heading.textContent = data.escalated ? '🚨 Call Concluded — Escalation Triggered' : '✅ Call Concluded — Routine Follow-Up Complete';
-
-    const summaryText = document.createElement('div');
-    summaryText.style.fontSize = '0.86rem';
-    summaryText.style.color = '#374151';
-    summaryText.style.marginBottom = '12px';
-    summaryText.textContent = data.report ? (data.report.summary || 'Check-in completed successfully.') : 'Check-in completed.';
-
-    const histBtn = document.createElement('button');
-    histBtn.className = 'btn btn-sm btn-primary';
-    histBtn.textContent = '📋 View Full Structured Report';
-    histBtn.onclick = () => showHistory(data.patient_id);
-
-    summaryCard.appendChild(heading);
-    summaryCard.appendChild(summaryText);
-    summaryCard.appendChild(histBtn);
-    transcript.appendChild(summaryCard);
-    window.scrollTo({ top: document.body.scrollHeight, behavior: 'smooth' });
-  }
-
-  loadPatients();
+  return { wrap, bubble, action };
 }
 
 function playNextTurn() {
   if (!turnQueue.length) {
     isPlayingTurn = false;
     currentTurn = null;
-    const ind = document.getElementById('audio-playing-indicator');
-    if (ind) ind.style.display = 'none';
+    const wave = document.getElementById('soundwave');
+    if (wave) wave.style.display = 'none';
 
-    // When all speech turns have completely finished, apply pending call conclusion!
+    // When all audio turns have concluded, reveal conclusion report!
     if (pendingCallEnd) {
       applyCallEnd(pendingCallEnd);
       pendingCallEnd = null;
@@ -923,111 +1396,75 @@ function playNextTurn() {
   const turn = turnQueue.shift();
   currentTurn = turn;
 
-  const bubbleElements = createSpeechBubbleSkeleton(turn.role, turn.speaker, turn.lang, turn.text, turn.speaker_voice, turn.gender);
-
-  const ind = document.getElementById('audio-playing-indicator');
-  const indText = document.getElementById('audio-speaking-text');
-  if (ind && indText) {
-    ind.style.display = 'flex';
-    indText.textContent = (turn.role === 'agent' ? '🤖 Clinic Assistant' : '👤 Patient') + ' is speaking…';
-  }
-
-  let turnFinished = false;
-  let wordStreamTimer = null;
-  let audioStarted = false;
-
-  function advanceToNextTurn() {
-    if (turnFinished) return;
-    turnFinished = true;
-    if (wordStreamTimer) clearInterval(wordStreamTimer);
-    if (bubbleElements) {
-      if (bubbleElements.card) bubbleElements.card.textContent = turn.text;
-      if (bubbleElements.action) bubbleElements.action.style.display = 'flex';
-    }
-    currentTurn = null;
-    // Natural slight conversational gap before the next turn
-    setTimeout(playNextTurn, 100);
-  }
-
-  function startWordStreaming(durationSec) {
-    if (turnFinished) return;
-    const words = turn.text.split(' ');
-    // Match word streaming speed precisely to audio duration
-    const totalDurationMs = (durationSec && durationSec > 0.4) ? (durationSec * 1000) : (words.length * 220);
-    const msPerWord = Math.max(70, Math.floor(totalDurationMs / words.length));
-
-    let wordIdx = 0;
-    if (bubbleElements && bubbleElements.card) {
-      bubbleElements.card.textContent = ''; // Clear placeholder hint
-      const cursor = document.createElement('span');
-      cursor.className = 'typing-cursor';
-      cursor.textContent = ' ▌';
-      bubbleElements.card.appendChild(cursor);
-
-      wordStreamTimer = setInterval(() => {
-        if (wordIdx < words.length) {
-          const wordText = (wordIdx > 0 ? ' ' : '') + words[wordIdx];
-          cursor.before(wordText);
-          wordIdx++;
-          window.scrollTo({ top: document.body.scrollHeight, behavior: 'smooth' });
-        } else {
-          clearInterval(wordStreamTimer);
-          cursor.remove();
-          bubbleElements.card.textContent = turn.text;
-        }
-      }, msPerWord);
-    }
-  }
+  const bubbleElements = createSpeechBubble(turn.role, turn.speaker, turn.lang, turn.text, turn.speaker_voice, turn.gender);
+  const wave = document.getElementById('soundwave');
+  if (wave) wave.style.display = 'flex';
 
   const cAudio = getCallAudio();
   const audioUrl = '/api/speak?role=' + turn.role + '&lang=' + encodeURIComponent(turn.lang) + '&speaker=' + encodeURIComponent(turn.speaker_voice || '') + '&gender=' + encodeURIComponent(turn.gender || 'female') + '&text=' + encodeURIComponent(turn.text);
 
-  // Reset listeners
   cAudio.onplaying = null;
+  cAudio.ontimeupdate = null;
   cAudio.onended = null;
   cAudio.onerror = null;
 
   cAudio.muted = !audioEnabled;
-  cAudio.volume = audioEnabled ? 1 : 0;
+  cAudio.volume = audioEnabled ? 1.0 : 0.0;
   cAudio.src = audioUrl;
 
-  cAudio.onplaying = () => {
-    if (!audioStarted) {
-      audioStarted = true;
-      startWordStreaming(cAudio.duration);
+  const words = turn.text.split(' ');
+  let turnFinished = false;
+
+  function finishTurn() {
+    if (turnFinished) return;
+    turnFinished = true;
+    if (bubbleElements) {
+      if (bubbleElements.bubble) bubbleElements.bubble.textContent = turn.text;
+      if (bubbleElements.action) bubbleElements.action.style.display = 'flex';
     }
+    currentTurn = null;
+    // Small natural pause before other party speaks
+    setTimeout(playNextTurn, 120);
+  }
+
+  // Audio-Driven Real-Time Word Sync (Single Source of Truth)
+  cAudio.ontimeupdate = () => {
+    if (turnFinished || !cAudio.duration) return;
+    const progress = Math.min(1.0, cAudio.currentTime / cAudio.duration);
+    const wordsToShow = Math.max(1, Math.ceil(progress * words.length));
+    const visibleText = words.slice(0, wordsToShow).join(' ');
+
+    if (bubbleElements && bubbleElements.bubble) {
+      bubbleElements.bubble.textContent = visibleText;
+      if (wordsToShow < words.length) {
+        const cursor = document.createElement('span');
+        cursor.className = 'typing-cursor';
+        cursor.textContent = ' ▌';
+        bubbleElements.bubble.appendChild(cursor);
+      }
+    }
+    window.scrollTo({ top: document.body.scrollHeight, behavior: 'smooth' });
   };
 
   cAudio.onended = () => {
-    advanceToNextTurn();
+    finishTurn();
   };
 
   cAudio.onerror = (e) => {
-    console.warn('Live call audio playback error, streaming words visually:', e);
-    if (!audioStarted) {
-      audioStarted = true;
-      startWordStreaming(turn.text.split(' ').length * 0.22);
+    console.warn('Audio stream error, displaying text visually:', e);
+    if (bubbleElements && bubbleElements.bubble) {
+      bubbleElements.bubble.textContent = turn.text;
     }
-    setTimeout(advanceToNextTurn, (turn.text.split(' ').length * 220) + 200);
+    setTimeout(finishTurn, (words.length * 200) + 200);
   };
 
   cAudio.play().catch(e => {
-    console.warn('Call audio play error, streaming visually:', e);
-    if (!audioStarted) {
-      audioStarted = true;
-      startWordStreaming(turn.text.split(' ').length * 0.22);
+    console.warn('Play prevented or delayed:', e);
+    if (bubbleElements && bubbleElements.bubble) {
+      bubbleElements.bubble.textContent = turn.text;
     }
-    setTimeout(advanceToNextTurn, (turn.text.split(' ').length * 220) + 200);
+    setTimeout(finishTurn, (words.length * 200) + 200);
   });
-
-  // Safety timeout: only if audio fails to play after 6 seconds, fallback to visual stream
-  setTimeout(() => {
-    if (!audioStarted && !turnFinished) {
-      audioStarted = true;
-      startWordStreaming(turn.text.split(' ').length * 0.22);
-      setTimeout(advanceToNextTurn, (turn.text.split(' ').length * 220) + 200);
-    }
-  }, 6000);
 }
 
 function playSingleTurn(role, lang, text, speakerVoice, gender) {
@@ -1035,55 +1472,90 @@ function playSingleTurn(role, lang, text, speakerVoice, gender) {
   const rAudio = getReplayAudio();
   if (!rAudio) return;
 
-  // If muted, automatically unmute so the user can hear the replay
   if (!audioEnabled) {
     audioEnabled = true;
     updateAudioButton();
     const cAudio = getCallAudio();
     if (cAudio) {
       cAudio.muted = false;
-      cAudio.volume = 1;
+      cAudio.volume = 1.0;
     }
   }
 
   const audioUrl = '/api/speak?role=' + role + '&lang=' + encodeURIComponent(lang) + '&speaker=' + encodeURIComponent(speakerVoice || '') + '&gender=' + encodeURIComponent(gender || 'female') + '&text=' + encodeURIComponent(text);
   rAudio.muted = !audioEnabled;
-  rAudio.volume = audioEnabled ? 1 : 0;
+  rAudio.volume = audioEnabled ? 1.0 : 0.0;
   rAudio.src = audioUrl;
-  rAudio.play().catch(e => console.warn('Replay play error:', e));
+  rAudio.play().catch(e => console.warn('Replay audio error:', e));
+}
+
+function applyCallEnd(data) {
+  const pName = document.getElementById('call-patient-name');
+  if (pName) {
+    pName.innerHTML = data.escalated 
+      ? '<span style="color:#fb7185">Call Ended · Escalation Triggered 🚨</span>' 
+      : '<span style="color:#34d399">Call Ended · Patient Adherent ✅</span>';
+  }
+
+  const transcript = document.getElementById('call-transcript');
+  if (transcript && !document.getElementById('call-conclusion-card')) {
+    const card = document.createElement('div');
+    card.id = 'call-conclusion-card';
+    card.className = 'conclusion-banner ' + (data.escalated ? 'alert' : 'ok');
+
+    card.innerHTML = `
+      <div class="conclusion-title">
+        <span>${data.escalated ? '🚨' : '✅'}</span>
+        <span>${data.escalated ? 'Clinical Escalation Required' : 'Check-In Completed — Routine Care'}</span>
+      </div>
+      <div class="conclusion-body">
+        ${data.report ? (data.report.summary || 'Post-discharge check-in completed.') : 'Check-in completed.'}
+      </div>
+      <button class="btn btn-sm btn-primary" onclick="showHistory('${data.patient_id}')">
+        📋 View Clinical Report & Details
+      </button>
+    `;
+    transcript.appendChild(card);
+    window.scrollTo({ top: document.body.scrollHeight, behavior: 'smooth' });
+  }
+
+  loadPatients();
 }
 
 function clearLiveCall() {
   const cAudio = getCallAudio();
   if (cAudio) {
-    try {
-      cAudio.pause();
-      cAudio.currentTime = 0;
-      cAudio.src = '';
-    } catch (e) {}
+    try { cAudio.pause(); cAudio.currentTime = 0; cAudio.src = ''; } catch (e) {}
   }
   const rAudio = getReplayAudio();
   if (rAudio) {
-    try {
-      rAudio.pause();
-      rAudio.currentTime = 0;
-      rAudio.src = '';
-    } catch (e) {}
+    try { rAudio.pause(); rAudio.currentTime = 0; rAudio.src = ''; } catch (e) {}
   }
   const transcript = document.getElementById('call-transcript');
   if (transcript) {
-    transcript.innerHTML = '<div class="empty" id="transcript-empty">Ready for outbound call.<br>Click <strong>📞 Check In</strong> on any patient to start a live voice conversation in their native language!</div>';
+    transcript.innerHTML = `
+      <div class="empty-state" id="transcript-empty">
+        Click <strong>📞 Start Native Call</strong> on any patient to connect live.<br>
+        The agent will verify medication doses, screen for worsening symptoms, and confirm clinical follow-ups.
+      </div>
+    `;
   }
-  const banner = document.getElementById('call-banner');
-  if (banner) banner.style.display = 'none';
-  const ind = document.getElementById('audio-playing-indicator');
-  if (ind) ind.style.display = 'none';
+  const wave = document.getElementById('soundwave');
+  if (wave) wave.style.display = 'none';
+  const pName = document.getElementById('call-patient-name');
+  if (pName) pName.textContent = 'Ready for Outbound Check-In';
+  const pDetails = document.getElementById('call-details');
+  if (pDetails) pDetails.textContent = 'Select any patient from the roster to initiate an AI call in their native language';
+  const pAvatar = document.getElementById('call-avatar');
+  if (pAvatar) pAvatar.textContent = '📞';
+
   turnQueue = [];
   isPlayingTurn = false;
   currentTurn = null;
+  pendingCallEnd = null;
 }
 
-// Keep Render free-tier container active 24/7 while browser is open
+// ── Heartbeat (Render Free-Tier 24/7) ──────────────────────────────────────────
 setInterval(() => {
   fetch('/health').catch(() => {});
 }, 180000);
@@ -1095,7 +1567,7 @@ async function showHistory(patientId) {
     if (!res.ok) throw new Error('HTTP ' + res.status);
     const history = await res.json();
     const patient = patients.find(p => p.id === patientId);
-    if (!history.length) { alert('No check-in history yet.'); return; }
+    if (!history.length) { alert('No check-in history recorded yet.'); return; }
     renderModal(patient, history[0]);
   } catch (err) {
     alert('Failed to load history: ' + err.message);
@@ -1105,26 +1577,48 @@ async function showHistory(patientId) {
 function renderModal(patient, checkin) {
   const r = checkin.report || {};
   const meds = Object.entries(r.medication_adherence || {}).map(([med, status]) =>
-    `<div class="med-row"><span>${med}</span><span class="med-status ${status}">${status.toUpperCase()}</span></div>`
+    `<div style="display:flex; justify-content:space-between; padding:8px 12px; background:rgba(15,23,42,0.6); border-radius:8px; margin-bottom:6px; font-size:0.86rem">
+      <span>💊 ${med}</span>
+      <span class="chip ${status === 'taken' ? 'ok' : 'alert'}">${status.toUpperCase()}</span>
+    </div>`
   ).join('');
+
   const symptoms = (r.symptoms_reported || []).length
-    ? r.symptoms_reported.map(s => `<span class="symptom-tag">${s}</span>`).join('')
-    : '<span style="color:#aaa;font-size:0.85rem">None reported</span>';
+    ? r.symptoms_reported.map(s => `<span class="chip alert">⚠️ ${s}</span>`).join(' ')
+    : '<span style="color:#64748b; font-size:0.85rem">None reported</span>';
+
   const flags = Object.entries(r.escalation_flags || {})
     .filter(([,v]) => v)
-    .map(([k]) => `<span class="badge alert">${k.replace(/_/g,' ')}</span>`)
-    .join('') || '<span style="color:#aaa;font-size:0.85rem">None</span>';
+    .map(([k]) => `<span class="chip alert">🚨 ${k.replace(/_/g,' ')}</span>`)
+    .join(' ') || '<span class="chip ok">✅ None</span>';
 
   document.getElementById('modal-body').innerHTML = `
-    <h3>📋 Check-In Report — ${patient ? patient.name : 'Patient'}</h3>
-    <div style="font-size:0.78rem;color:#aaa;margin-bottom:16px">${new Date(checkin.timestamp).toLocaleString('en-IN')}</div>
-    <div class="report-section"><label>Medication Adherence</label>${meds || '<span style="color:#aaa;font-size:0.85rem">None recorded</span>'}</div>
-    <div class="report-section"><label>Symptoms Reported</label><div class="flag-list">${symptoms}</div></div>
-    <div class="report-section"><label>Appointment Confirmed</label>
-      <span class="badge ${r.appointment_confirmed ? 'ok' : 'alert'}">${r.appointment_confirmed ? 'Yes' : 'No / Unknown'}</span>
+    <h3>📋 Check-In Clinical Report</h3>
+    <div style="font-size:0.82rem; color:#94a3b8; margin-bottom:18px">
+      Patient: <strong style="color:white">${patient ? patient.name : 'Unknown'}</strong> · ${new Date(checkin.timestamp).toLocaleString('en-IN')}
     </div>
-    <div class="report-section"><label>Escalation Flags</label><div class="flag-list">${flags}</div></div>
-    <div class="report-section"><label>Summary</label><div class="summary-box">${r.summary || '—'}</div></div>
+    <div style="margin-bottom:18px">
+      <div style="font-size:0.75rem; font-weight:700; color:#64748b; text-transform:uppercase; margin-bottom:6px">Medication Adherence</div>
+      ${meds || '<span style="color:#64748b; font-size:0.85rem">None recorded</span>'}
+    </div>
+    <div style="margin-bottom:18px">
+      <div style="font-size:0.75rem; font-weight:700; color:#64748b; text-transform:uppercase; margin-bottom:6px">Reported Symptoms</div>
+      <div>${symptoms}</div>
+    </div>
+    <div style="margin-bottom:18px">
+      <div style="font-size:0.75rem; font-weight:700; color:#64748b; text-transform:uppercase; margin-bottom:6px">Appointment Confirmed</div>
+      <span class="chip ${r.appointment_confirmed ? 'ok' : 'alert'}">${r.appointment_confirmed ? 'Yes, Confirmed' : 'No / Unconfirmed'}</span>
+    </div>
+    <div style="margin-bottom:18px">
+      <div style="font-size:0.75rem; font-weight:700; color:#64748b; text-transform:uppercase; margin-bottom:6px">Escalation Triggers</div>
+      <div>${flags}</div>
+    </div>
+    <div>
+      <div style="font-size:0.75rem; font-weight:700; color:#64748b; text-transform:uppercase; margin-bottom:6px">Clinical Summary</div>
+      <div style="background:rgba(99,102,241,0.1); border:1px solid rgba(99,102,241,0.25); border-radius:10px; padding:12px; font-size:0.88rem; color:#cbd5e1; line-height:1.6">
+        ${r.summary || '—'}
+      </div>
+    </div>
   `;
   document.getElementById('modal-overlay').classList.add('open');
 }
@@ -1144,27 +1638,25 @@ async function loadEscalations() {
     escalations = await res.json();
     if (!tbody) return;
     if (!escalations.length) {
-      tbody.innerHTML = '<tr><td colspan="6" class="empty">No escalations yet — all clear! 🎉</td></tr>';
+      tbody.innerHTML = '<tr><td colspan="6" class="empty-state">No escalations yet — all patients adherent! 🎉</td></tr>';
       return;
     }
     tbody.innerHTML = escalations.map((e, index) => {
       const triggers = (Array.isArray(e.triggers) ? e.triggers : JSON.parse(e.triggers || '[]'))
-        .map(t => `<span class="badge alert">${t.replace(/_/g,' ')}</span>`).join(' ');
+        .map(t => `<span class="chip alert">${t.replace(/_/g,' ')}</span>`).join(' ');
       const report = typeof e.report === 'string' ? JSON.parse(e.report) : (e.report || {});
       return `<tr>
-        <td style="white-space:nowrap;color:#888">${new Date(e.timestamp).toLocaleString('en-IN')}</td>
-        <td><strong>${e.patient_name}</strong><br><span style="font-size:0.76rem;color:#aaa">${e.patient_id}</span></td>
+        <td style="white-space:nowrap; color:#94a3b8">${new Date(e.timestamp).toLocaleString('en-IN')}</td>
+        <td><strong style="color:white">${e.patient_name}</strong><br><span style="font-size:0.75rem; color:#64748b">${e.patient_id}</span></td>
         <td>${triggers}</td>
         <td style="font-size:0.8rem">${e.coordinator_email}<br>${e.coordinator_phone}</td>
-        <td style="font-size:0.82rem;color:#555;max-width:220px">${report.summary || '—'}</td>
-        <td><button class="btn btn-sm" style="background:#f0f4ff;color:#6c63ff"
-            onclick="showEscalationDetail(${index})">View</button></td>
+        <td style="font-size:0.82rem; color:#cbd5e1; max-width:240px">${report.summary || '—'}</td>
+        <td><button class="btn btn-sm btn-secondary" onclick="showEscalationDetail(${index})">View</button></td>
       </tr>`;
     }).join('');
   } catch (err) {
-    console.error('Failed to load escalations:', err);
     if (tbody) {
-      tbody.innerHTML = '<tr><td colspan="6" class="empty" style="color:#dc2626">Failed to load escalations: ' + err.message + '</td></tr>';
+      tbody.innerHTML = '<tr><td colspan="6" class="empty-state" style="color:var(--rose)">Failed to load escalations: ' + err.message + '</td></tr>';
     }
   }
 }
@@ -1173,11 +1665,10 @@ function showEscalationDetail(index) {
   const e = escalations[index];
   if (!e) return;
   const report = typeof e.report === 'string' ? JSON.parse(e.report) : (e.report || {});
-  const patient = { id: e.patient_id, name: e.patient_name };
-  renderModal(patient, { report, timestamp: e.timestamp });
+  renderModal({ id: e.patient_id, name: e.patient_name }, { report, timestamp: e.timestamp });
 }
 
-// ── Live Event Stream (SSE) ────────────────────────────────────────────────────
+// ── SSE Live Pipeline ────────────────────────────────────────────────────────
 const logConsole = document.getElementById('log-console');
 try {
   const evtSource = new EventSource('/api/logs');
@@ -1186,19 +1677,16 @@ try {
       const parsed = JSON.parse(e.data);
       if (typeof parsed === 'object' && parsed !== null) {
         if (parsed.type === 'call_start') {
-          const banner = document.getElementById('call-banner');
           const pName = document.getElementById('call-patient-name');
           const pDetails = document.getElementById('call-details');
-          const pBadge = document.getElementById('call-status-badge');
-          if (banner) banner.style.display = 'block';
+          const pAvatar = document.getElementById('call-avatar');
           if (pName) pName.textContent = 'Active Call: ' + parsed.patient_name;
           if (pDetails) pDetails.textContent = 'Language: ' + (LANG_NAMES[parsed.language] || parsed.language) + ' · Phone: ' + parsed.phone;
-          if (pBadge) pBadge.textContent = 'Connected (Live)';
+          if (pAvatar) pAvatar.textContent = (parsed.gender === 'female' ? '👩' : '👨');
         } else if (parsed.type === 'turn') {
           enqueueTurn(parsed);
         } else if (parsed.type === 'call_end') {
           pendingCallEnd = parsed;
-          // Apply immediately ONLY if no turns are playing or waiting in queue
           if (!isPlayingTurn && !turnQueue.length) {
             applyCallEnd(pendingCallEnd);
             pendingCallEnd = null;
@@ -1206,40 +1694,21 @@ try {
         } else if (parsed.type === 'log') {
           if (logConsole) {
             const line = document.createElement('div');
-            line.className = 'log-line';
             line.textContent = parsed.text;
             logConsole.appendChild(line);
             logConsole.scrollTop = logConsole.scrollHeight;
           }
         }
-      } else {
-        if (logConsole) {
-          const line = document.createElement('div');
-          line.className = 'log-line';
-          line.textContent = String(parsed);
-          logConsole.appendChild(line);
-          logConsole.scrollTop = logConsole.scrollHeight;
-        }
       }
-    } catch (err) {
-      if (logConsole) {
-        const line = document.createElement('div');
-        line.className = 'log-line';
-        line.textContent = e.data;
-        logConsole.appendChild(line);
-      }
-    }
-  };
-  evtSource.onerror = (err) => {
-    console.warn('SSE notification:', err);
+    } catch (err) {}
   };
 } catch (e) {
-  console.warn('EventSource setup error:', e);
+  console.warn('EventSource error:', e);
 }
 
-// ── Init & auto-refresh ────────────────────────────────────────────────────────
+// Initial Boot
 loadPatients();
-setInterval(loadPatients, 10000);   // refresh patient cards every 10s
+setInterval(loadPatients, 12000);
 </script>
 </body>
 </html>
