@@ -514,6 +514,10 @@ DASHBOARD_HTML = """<!DOCTYPE html>
       <span id="audio-speaking-text" style="font-weight:400; font-style:italic">...</span>
     </div>
 
+    <!-- Dedicated Persistent Audio Elements for Live Conversation and Replay -->
+    <audio id="call-audio" preload="auto" style="display:none"></audio>
+    <audio id="replay-audio" preload="auto" style="display:none"></audio>
+
     <!-- Live Speech Bubbles -->
     <div id="call-transcript" style="display:flex; flex-direction:column; margin-bottom:20px; min-height:120px">
       <div class="empty" id="transcript-empty">
@@ -690,7 +694,20 @@ let turnQueue = [];
 let isPlayingTurn = false;
 let audioEnabled = true;
 let audioUnlocked = false;
-let currentPlayingAudio = null;
+let currentTurn = null;
+
+let callAudio = null;
+let replayAudio = null;
+
+function getCallAudio() {
+  if (!callAudio) callAudio = document.getElementById('call-audio');
+  return callAudio;
+}
+
+function getReplayAudio() {
+  if (!replayAudio) replayAudio = document.getElementById('replay-audio');
+  return replayAudio;
+}
 
 function updateAudioButton() {
   const btn = document.getElementById('btn-audio-toggle');
@@ -706,42 +723,55 @@ function toggleAudio() {
   audioEnabled = !audioEnabled;
   updateAudioButton();
 
-  if (!audioEnabled) {
-    // Immediately silence any active audio
-    if (currentPlayingAudio) {
-      currentPlayingAudio.muted = true;
-      currentPlayingAudio.volume = 0;
+  const cAudio = getCallAudio();
+  const rAudio = getReplayAudio();
+
+  if (cAudio) {
+    cAudio.muted = !audioEnabled;
+    cAudio.volume = audioEnabled ? 1 : 0;
+    // If unmuting during active turn, resume playback immediately
+    if (audioEnabled && isPlayingTurn && cAudio.paused) {
+      cAudio.play().catch(e => console.warn('Unmute resume error:', e));
     }
-  } else {
-    // Unmute: immediately restore sound to active audio
-    if (currentPlayingAudio) {
-      currentPlayingAudio.muted = false;
-      currentPlayingAudio.volume = 1;
-      if (currentPlayingAudio.paused) {
-        currentPlayingAudio.play().catch(e => console.warn('Resume audio failed:', e));
-      }
-    } else if (!isPlayingTurn && turnQueue.length) {
-      playNextTurn();
-    }
+  }
+
+  if (rAudio) {
+    rAudio.muted = !audioEnabled;
+    rAudio.volume = audioEnabled ? 1 : 0;
   }
 }
 
 function unlockAudio() {
   if (!audioUnlocked) {
     try {
-      const silent = new Audio("data:audio/wav;base64,UklGRigAAABXQVZFZm10IBIAAAABAAEARKwAAIhYAQACABAAAABkYXRhAgAAAAEA");
-      silent.play().then(() => { audioUnlocked = true; }).catch(() => {});
+      const silent = "data:audio/wav;base64,UklGRigAAABXQVZFZm10IBIAAAABAAEARKwAAIhYAQACABAAAABkYXRhAgAAAAEA";
+      const c = getCallAudio();
+      if (c) {
+        c.src = silent;
+        c.play().then(() => {
+          c.pause();
+          c.currentTime = 0;
+          audioUnlocked = true;
+        }).catch(() => {});
+      }
+      const r = getReplayAudio();
+      if (r) {
+        r.src = silent;
+        r.play().then(() => {
+          r.pause();
+          r.currentTime = 0;
+        }).catch(() => {});
+      }
     } catch (e) {}
   }
 }
 
 function enqueueTurn(turn) {
-  // Pre-load audio immediately in the browser
+  // Pre-load audio into browser cache
   const audioUrl = '/api/speak?role=' + turn.role + '&lang=' + encodeURIComponent(turn.lang) + '&text=' + encodeURIComponent(turn.text);
   const preloaded = new Audio(audioUrl);
   preloaded.preload = "auto";
   preloaded.load();
-  turn.audioObj = preloaded;
 
   turnQueue.push(turn);
   if (!isPlayingTurn) {
@@ -790,6 +820,7 @@ function createSpeechBubbleSkeleton(role, speaker, lang, fullText) {
 function playNextTurn() {
   if (!turnQueue.length) {
     isPlayingTurn = false;
+    currentTurn = null;
     const ind = document.getElementById('audio-playing-indicator');
     if (ind) ind.style.display = 'none';
     return;
@@ -797,6 +828,7 @@ function playNextTurn() {
 
   isPlayingTurn = true;
   const turn = turnQueue.shift();
+  currentTurn = turn;
 
   const bubbleElements = createSpeechBubbleSkeleton(turn.role, turn.speaker, turn.lang, turn.text);
 
@@ -809,11 +841,6 @@ function playNextTurn() {
 
   let turnFinished = false;
   let wordStreamTimer = null;
-
-  const audio = turn.audioObj || new Audio('/api/speak?role=' + turn.role + '&lang=' + encodeURIComponent(turn.lang) + '&text=' + encodeURIComponent(turn.text));
-  currentPlayingAudio = audio;
-  audio.muted = !audioEnabled;
-  audio.volume = audioEnabled ? 1 : 0;
   let audioStarted = false;
 
   function advanceToNextTurn() {
@@ -824,10 +851,8 @@ function playNextTurn() {
       if (bubbleElements.card) bubbleElements.card.textContent = turn.text;
       if (bubbleElements.action) bubbleElements.action.style.display = 'flex';
     }
-    if (currentPlayingAudio === audio) {
-      currentPlayingAudio = null;
-    }
-    // Natural slight conversational gap before the other party replies
+    currentTurn = null;
+    // Natural slight conversational gap before the next turn
     setTimeout(playNextTurn, 100);
   }
 
@@ -856,44 +881,50 @@ function playNextTurn() {
           clearInterval(wordStreamTimer);
           cursor.remove();
           bubbleElements.card.textContent = turn.text;
-          // Advance if audio already finished or paused
-          if (!currentPlayingAudio || currentPlayingAudio.ended || currentPlayingAudio.paused) {
-            setTimeout(advanceToNextTurn, 180);
-          }
         }
       }, msPerWord);
     }
   }
 
-  // Trigger word streaming ONLY when audio playback has genuinely started producing sound
-  audio.onplaying = () => {
+  const cAudio = getCallAudio();
+  const audioUrl = '/api/speak?role=' + turn.role + '&lang=' + encodeURIComponent(turn.lang) + '&text=' + encodeURIComponent(turn.text);
+
+  // Reset listeners
+  cAudio.onplaying = null;
+  cAudio.onended = null;
+  cAudio.onerror = null;
+
+  cAudio.muted = !audioEnabled;
+  cAudio.volume = audioEnabled ? 1 : 0;
+  cAudio.src = audioUrl;
+
+  cAudio.onplaying = () => {
     if (!audioStarted) {
       audioStarted = true;
-      startWordStreaming(audio.duration);
+      startWordStreaming(cAudio.duration);
     }
   };
 
-  audio.onended = () => {
-    if (currentPlayingAudio === audio) currentPlayingAudio = null;
+  cAudio.onended = () => {
     advanceToNextTurn();
   };
 
-  audio.onerror = (e) => {
-    console.warn('Audio playback error, streaming words visually:', e);
-    if (currentPlayingAudio === audio) currentPlayingAudio = null;
+  cAudio.onerror = (e) => {
+    console.warn('Live call audio playback error, streaming words visually:', e);
     if (!audioStarted) {
       audioStarted = true;
       startWordStreaming(turn.text.split(' ').length * 0.22);
     }
+    setTimeout(advanceToNextTurn, (turn.text.split(' ').length * 220) + 200);
   };
 
-  audio.play().catch(e => {
-    console.warn('Playback error or blocked, streaming visually:', e);
-    if (currentPlayingAudio === audio) currentPlayingAudio = null;
+  cAudio.play().catch(e => {
+    console.warn('Call audio play error, streaming visually:', e);
     if (!audioStarted) {
       audioStarted = true;
       startWordStreaming(turn.text.split(' ').length * 0.22);
     }
+    setTimeout(advanceToNextTurn, (turn.text.split(' ').length * 220) + 200);
   });
 
   // Safety timeout: only if audio fails to play after 6 seconds, fallback to visual stream
@@ -901,41 +932,50 @@ function playNextTurn() {
     if (!audioStarted && !turnFinished) {
       audioStarted = true;
       startWordStreaming(turn.text.split(' ').length * 0.22);
+      setTimeout(advanceToNextTurn, (turn.text.split(' ').length * 220) + 200);
     }
   }, 6000);
 }
 
 function playSingleTurn(role, lang, text) {
   unlockAudio();
+  const rAudio = getReplayAudio();
+  if (!rAudio) return;
+
+  // If muted, automatically unmute so the user can hear the replay
   if (!audioEnabled) {
     audioEnabled = true;
     updateAudioButton();
+    const cAudio = getCallAudio();
+    if (cAudio) {
+      cAudio.muted = false;
+      cAudio.volume = 1;
+    }
   }
-  if (currentPlayingAudio) {
-    try {
-      currentPlayingAudio.pause();
-      currentPlayingAudio.currentTime = 0;
-    } catch (e) {}
-    currentPlayingAudio = null;
-  }
+
   const audioUrl = '/api/speak?role=' + role + '&lang=' + encodeURIComponent(lang) + '&text=' + encodeURIComponent(text);
-  const audio = new Audio(audioUrl);
-  audio.muted = false;
-  audio.volume = 1;
-  currentPlayingAudio = audio;
-  audio.onended = () => {
-    if (currentPlayingAudio === audio) currentPlayingAudio = null;
-  };
-  audio.play().catch(e => console.warn(e));
+  rAudio.muted = !audioEnabled;
+  rAudio.volume = audioEnabled ? 1 : 0;
+  rAudio.src = audioUrl;
+  rAudio.play().catch(e => console.warn('Replay play error:', e));
 }
 
 function clearLiveCall() {
-  if (currentPlayingAudio) {
+  const cAudio = getCallAudio();
+  if (cAudio) {
     try {
-      currentPlayingAudio.pause();
-      currentPlayingAudio.currentTime = 0;
+      cAudio.pause();
+      cAudio.currentTime = 0;
+      cAudio.src = '';
     } catch (e) {}
-    currentPlayingAudio = null;
+  }
+  const rAudio = getReplayAudio();
+  if (rAudio) {
+    try {
+      rAudio.pause();
+      rAudio.currentTime = 0;
+      rAudio.src = '';
+    } catch (e) {}
   }
   const transcript = document.getElementById('call-transcript');
   if (transcript) {
@@ -947,6 +987,7 @@ function clearLiveCall() {
   if (ind) ind.style.display = 'none';
   turnQueue = [];
   isPlayingTurn = false;
+  currentTurn = null;
 }
 
 // Keep Render free-tier container active 24/7 while browser is open
