@@ -47,13 +47,54 @@ try:
 except Exception as e:
     print(f"Warning during startup init: {e}")
 
+def _keepalive_worker():
+    """
+    Automatic keepalive for Render free tier.
+    Pings the public external URL every 10 minutes to prevent the 15-minute inactivity spin down.
+    """
+    import time
+    import httpx
+    import os
+
+    # Wait 60s for server to complete startup
+    time.sleep(60)
+
+    url = os.getenv("RENDER_EXTERNAL_URL") or os.getenv("PUBLIC_URL")
+    if not url and os.getenv("RENDER_EXTERNAL_HOSTNAME"):
+        url = f"https://{os.getenv('RENDER_EXTERNAL_HOSTNAME')}"
+
+    if not url:
+        print("ℹ️ Keepalive: No public URL detected yet. Set PUBLIC_URL or RENDER_EXTERNAL_URL.")
+        return
+
+    health_url = f"{url.rstrip('/')}/health"
+    print(f"⚡ Keepalive active: pinging {health_url} every 10 mins to stay awake 24/7.")
+
+    while True:
+        try:
+            time.sleep(600)  # 10 minutes (well under the 15 min free-tier cutoff)
+            resp = httpx.get(health_url, timeout=30)
+            if resp.status_code == 200:
+                print(f"💓 Keepalive ping successful: HTTP {resp.status_code}")
+            else:
+                print(f"⚠️ Keepalive ping returned: HTTP {resp.status_code}")
+        except Exception as e:
+            print(f"⚠️ Keepalive ping error: {e}")
+
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     init_db()
     patient_db.load_patients()
+    # Start self-keepalive daemon
+    t = threading.Thread(target=_keepalive_worker, daemon=True)
+    t.start()
     yield
 
 app = FastAPI(title="Missed-Dose Companion", lifespan=lifespan)
+
+@app.get("/health")
+def health():
+    return {"status": "ok", "time": datetime.now().isoformat()}
 
 # ── SSE event bus ─────────────────────────────────────────────────────────────
 
