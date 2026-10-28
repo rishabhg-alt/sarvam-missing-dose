@@ -9,8 +9,33 @@ from pathlib import Path
 from datetime import datetime
 
 import os
-_DATA_DIR = Path(os.getenv("RENDER_DISK_PATH", "/data")) if os.getenv("RENDER") else Path(__file__).parent.parent
-DB_PATH = _DATA_DIR / "checkins.db"
+
+def _get_db_path() -> Path:
+    # If custom disk path is configured and accessible
+    custom_dir = os.getenv("RENDER_DISK_PATH")
+    if custom_dir:
+        p = Path(custom_dir)
+        try:
+            p.mkdir(parents=True, exist_ok=True)
+            return p / "checkins.db"
+        except Exception:
+            pass
+    
+    # Default to project root
+    project_dir = Path(__file__).parent.parent
+    try:
+        project_dir.mkdir(parents=True, exist_ok=True)
+        # Test writability
+        test_file = project_dir / ".write_test"
+        test_file.touch()
+        test_file.unlink()
+        return project_dir / "checkins.db"
+    except Exception:
+        # Fallback to /tmp if project directory is read-only
+        tmp_dir = Path("/tmp")
+        return tmp_dir / "checkins.db"
+
+DB_PATH = _get_db_path()
 
 def _conn():
     c = sqlite3.connect(DB_PATH)

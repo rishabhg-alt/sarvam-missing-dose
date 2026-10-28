@@ -19,7 +19,3 @@ services:
         sync: false
       - key: ESCALATION_WEBHOOK_URL
         sync: false
-    disk:
-      name: data
-      mountPath: /data
-      sizeGB: 1
