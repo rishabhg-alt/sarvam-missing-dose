@@ -735,6 +735,17 @@ DASHBOARD_HTML = """<!DOCTYPE html>
     display: flex; align-items: center; justify-content: center;
     font-size: 1.4rem;
     box-shadow: 0 0 16px var(--primary-glow);
+    transition: all 0.3s ease;
+  }
+  .caller-avatar.ringing {
+    animation: ring-pulse 1.4s infinite ease-in-out;
+    background: linear-gradient(135deg, #f59e0b, #d97706);
+    box-shadow: 0 0 20px rgba(245, 158, 11, 0.5);
+  }
+  @keyframes ring-pulse {
+    0% { transform: scale(1); box-shadow: 0 0 0 0 rgba(245, 158, 11, 0.6); }
+    50% { transform: scale(1.08); box-shadow: 0 0 0 12px rgba(245, 158, 11, 0); }
+    100% { transform: scale(1); box-shadow: 0 0 0 0 rgba(245, 158, 11, 0); }
   }
   .caller-name {
     font-size: 1.05rem;
@@ -883,6 +894,77 @@ DASHBOARD_HTML = """<!DOCTYPE html>
     color: #cbd5e1;
     margin-bottom: 14px;
     line-height: 1.6;
+  }
+
+  /* ── Dialing & Connecting Screen ── */
+  .dialing-banner {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+    padding: 50px 24px;
+    text-align: center;
+    background: linear-gradient(180deg, rgba(30, 41, 59, 0.6) 0%, rgba(15, 23, 42, 0.85) 100%);
+    border: 1px dashed rgba(245, 158, 11, 0.45);
+    border-radius: 20px;
+    margin: 8px 0;
+    animation: fadein 0.3s ease-out;
+  }
+  .dialing-pulse-ring {
+    position: relative;
+    width: 68px;
+    height: 68px;
+    border-radius: 50%;
+    background: rgba(245, 158, 11, 0.15);
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    margin-bottom: 18px;
+    animation: ring-pulse 1.5s infinite;
+  }
+  .dialing-pulse-ring .pulse-icon {
+    font-size: 2rem;
+    animation: shake 1.2s infinite ease-in-out;
+  }
+  @keyframes shake {
+    0%, 100% { transform: rotate(0deg); }
+    20%, 60% { transform: rotate(-10deg); }
+    40%, 80% { transform: rotate(10deg); }
+  }
+  .dialing-heading {
+    font-size: 1.25rem;
+    font-weight: 800;
+    color: #ffffff;
+    margin-bottom: 6px;
+    letter-spacing: -0.01em;
+  }
+  .dialing-sub {
+    font-size: 0.88rem;
+    color: #94a3b8;
+    margin-bottom: 16px;
+    max-width: 440px;
+    line-height: 1.5;
+  }
+  .dialing-meta {
+    display: inline-flex;
+    align-items: center;
+    gap: 8px;
+    padding: 6px 16px;
+    background: rgba(245, 158, 11, 0.12);
+    border: 1px solid rgba(245, 158, 11, 0.3);
+    border-radius: 99px;
+    font-size: 0.8rem;
+    font-weight: 600;
+    color: #fcd34d;
+    font-family: 'JetBrains Mono', monospace;
+  }
+  .pulsing-amber-dot {
+    width: 8px;
+    height: 8px;
+    border-radius: 50%;
+    background: #f59e0b;
+    box-shadow: 0 0 10px #f59e0b;
+    animation: blink 0.8s infinite;
   }
 
   /* ── Escalations Table ── */
@@ -1206,8 +1288,13 @@ function renderPatients() {
     const isFemale = (p.gender || '').toLowerCase() === 'female';
     const initials = p.name.split(' ').map(n => n[0]).join('').slice(0, 2);
     
-    const statusChip = p.job_status === 'running'
-      ? '<span class="chip running">⏳ Calling…</span>'
+    const isThisCalling = (activeCallingPatient && p.id === activeCallingPatient.id && currentCallState !== 'ended' && currentCallState !== 'idle');
+    const isRunning = p.job_status === 'running' || isThisCalling;
+    
+    const statusChip = isRunning
+      ? (currentCallState === 'dialing' 
+          ? '<span class="chip running">⏳ Dialing…</span>' 
+          : '<span class="chip running" style="background:rgba(59,130,246,0.15);color:#93c5fd;border-color:rgba(59,130,246,0.3)">📞 In Call…</span>')
       : p.last_escalated
         ? '<span class="chip alert">🚨 Escalated</span>'
         : p.total_checkins > 0
@@ -1215,7 +1302,10 @@ function renderPatients() {
           : '<span class="chip" style="background:rgba(255,255,255,0.06);color:#94a3b8">Pending 1st Check</span>';
 
     const meds = (p.medications || []).map(m => `<div class="med-pill-item"><span>💊</span> ${m}</div>`).join('');
-    const btnDisabled = p.job_status === 'running' ? 'disabled' : '';
+    const btnText = isRunning
+      ? (currentCallState === 'dialing' ? '⏳ Dialing…' : '📞 In Call…')
+      : '📞 Start Native Call';
+    const btnDisabled = isRunning ? 'disabled' : '';
 
     return `
     <div class="patient-card" id="card-${p.id}">
@@ -1247,7 +1337,7 @@ function renderPatients() {
 
       <div class="card-footer">
         <button class="btn btn-primary" id="btn-${p.id}" onclick="triggerCheckin('${p.id}')" ${btnDisabled}>
-          📞 Start Native Call
+          ${btnText}
         </button>
         ${p.total_checkins > 0 ? `<button class="btn btn-secondary" onclick="showHistory('${p.id}')">📋 History</button>` : ''}
       </div>
@@ -1255,8 +1345,16 @@ function renderPatients() {
   }).join('');
 }
 
+// ── Call Progression State ──────────────────────────────────────────────────
+let currentCallState = 'idle'; // 'idle' | 'dialing' | 'connecting' | 'speaking' | 'ended'
+let activeCallingPatient = null;
+
 async function triggerCheckin(patientId) {
   unlockAudio();
+  const patient = patients.find(p => p.id === patientId);
+  activeCallingPatient = patient;
+  currentCallState = 'dialing';
+
   const btn = document.getElementById('btn-' + patientId);
   if (btn) {
     btn.disabled = true;
@@ -1266,16 +1364,54 @@ async function triggerCheckin(patientId) {
   showTab('logs');
   autoScrollEnabled = true;
   updateScrollButton();
-  clearLiveCall();
 
-  const patient = patients.find(p => p.id === patientId);
+  // Reset audio & queues for clean call start
+  const cAudio = getCallAudio();
+  if (cAudio) {
+    try { cAudio.pause(); cAudio.currentTime = 0; cAudio.src = ''; } catch (e) {}
+  }
+  const rAudio = getReplayAudio();
+  if (rAudio) {
+    try { rAudio.pause(); rAudio.currentTime = 0; rAudio.src = ''; } catch (e) {}
+  }
+  turnQueue = [];
+  isPlayingTurn = false;
+  currentTurn = null;
+  pendingCallEnd = null;
+
+  const wave = document.getElementById('soundwave');
+  if (wave) wave.style.display = 'none';
+
   if (patient) {
     const pName = document.getElementById('call-patient-name');
     const pDetails = document.getElementById('call-details');
     const pAvatar = document.getElementById('call-avatar');
-    if (pName) pName.textContent = 'Connecting: ' + patient.name;
-    if (pDetails) pDetails.textContent = 'Native Language: ' + (LANG_NAMES[patient.language] || patient.language) + ' · Phone: ' + patient.phone;
-    if (pAvatar) pAvatar.textContent = (patient.gender === 'female' ? '👩' : '👨');
+    if (pName) {
+      pName.innerHTML = `<span class="chip running">⏳ DIALING…</span> ${patient.name}`;
+    }
+    if (pDetails) {
+      pDetails.textContent = `Outbound AI Call · ${patient.phone} · ${LANG_NAMES[patient.language] || patient.language}`;
+    }
+    if (pAvatar) {
+      pAvatar.className = 'caller-avatar ringing';
+      pAvatar.textContent = '📲';
+    }
+
+    const transcript = document.getElementById('call-transcript');
+    if (transcript) {
+      transcript.innerHTML = `
+        <div class="dialing-banner" id="dialing-indicator">
+          <div class="dialing-pulse-ring">
+            <div class="pulse-icon">📲</div>
+          </div>
+          <div class="dialing-heading">Dialing ${patient.name}…</div>
+          <div class="dialing-sub">Establishing outbound voice channel in <strong>${LANG_NAMES[patient.language] || patient.language}</strong></div>
+          <div class="dialing-meta">
+            <span class="pulsing-amber-dot"></span> Calling ${patient.phone} · Waiting for connection…
+          </div>
+        </div>
+      `;
+    }
   }
 
   try {
@@ -1289,9 +1425,11 @@ async function triggerCheckin(patientId) {
     const p = patients.find(x => x.id === patientId);
     if (p && p.job_status !== 'running') {
       clearInterval(poll);
-      if (btn) {
-        btn.disabled = false;
-        btn.textContent = '📞 Start Native Call';
+      if (currentCallState === 'ended' || currentCallState === 'idle') {
+        if (btn) {
+          btn.disabled = false;
+          btn.textContent = '📞 Start Native Call';
+        }
       }
     }
   }, 3000);
@@ -1495,6 +1633,26 @@ function createSpeechBubble(role, speaker, lang, fullText, speakerVoice, gender)
   if (!transcript) return null;
   const empty = document.getElementById('transcript-empty');
   if (empty) empty.remove();
+  const dialingInd = document.getElementById('dialing-indicator');
+  if (dialingInd) dialingInd.remove();
+
+  // Transition header from connecting/dialing to active live call
+  if (currentCallState !== 'speaking') {
+    currentCallState = 'speaking';
+    const pName = document.getElementById('call-patient-name');
+    const pDetails = document.getElementById('call-details');
+    const pAvatar = document.getElementById('call-avatar');
+    if (pName && activeCallingPatient) {
+      pName.innerHTML = `<span class="chip ok">🟢 LIVE CALL</span> ${activeCallingPatient.name}`;
+    }
+    if (pDetails && activeCallingPatient) {
+      pDetails.textContent = `Active Check-In · ${activeCallingPatient.phone} · ${LANG_NAMES[activeCallingPatient.language] || activeCallingPatient.language}`;
+    }
+    if (pAvatar && activeCallingPatient) {
+      pAvatar.className = 'caller-avatar';
+      pAvatar.textContent = (activeCallingPatient.gender === 'female' ? '👩' : '👨');
+    }
+  }
 
   const wrap = document.createElement('div');
   wrap.className = 'bubble-wrap ' + (role === 'agent' ? 'agent' : 'patient');
@@ -1636,6 +1794,13 @@ function playSingleTurn(role, lang, text, speakerVoice, gender) {
 }
 
 function applyCallEnd(data) {
+  currentCallState = 'ended';
+  activeCallingPatient = null;
+  const pAvatar = document.getElementById('call-avatar');
+  if (pAvatar) {
+    pAvatar.className = 'caller-avatar';
+  }
+
   const pName = document.getElementById('call-patient-name');
   if (pName) {
     pName.innerHTML = data.escalated 
@@ -1669,6 +1834,8 @@ function applyCallEnd(data) {
 }
 
 function clearLiveCall() {
+  currentCallState = 'idle';
+  activeCallingPatient = null;
   autoScrollEnabled = true;
   updateScrollButton();
 
@@ -1826,12 +1993,29 @@ try {
       const parsed = JSON.parse(e.data);
       if (typeof parsed === 'object' && parsed !== null) {
         if (parsed.type === 'call_start') {
+          currentCallState = 'connecting';
           const pName = document.getElementById('call-patient-name');
           const pDetails = document.getElementById('call-details');
           const pAvatar = document.getElementById('call-avatar');
-          if (pName) pName.textContent = 'Active Call: ' + parsed.patient_name;
-          if (pDetails) pDetails.textContent = 'Language: ' + (LANG_NAMES[parsed.language] || parsed.language) + ' · Phone: ' + parsed.phone;
-          if (pAvatar) pAvatar.textContent = (parsed.gender === 'female' ? '👩' : '👨');
+          if (pName) {
+            pName.innerHTML = `<span class="chip running" style="background:rgba(59,130,246,0.15);color:#93c5fd;border-color:rgba(59,130,246,0.3)">📞 CONNECTING…</span> ${parsed.patient_name}`;
+          }
+          if (pDetails) {
+            pDetails.textContent = `Call Connected · Initializing Sarvam AI Follow-Up Companion (${LANG_NAMES[parsed.language] || parsed.language})…`;
+          }
+          if (pAvatar) {
+            pAvatar.className = 'caller-avatar ringing';
+            pAvatar.textContent = '📲';
+          }
+          const ind = document.getElementById('dialing-indicator');
+          if (ind) {
+            const h = ind.querySelector('.dialing-heading');
+            if (h) h.textContent = `Connecting with ${parsed.patient_name}…`;
+            const s = ind.querySelector('.dialing-sub');
+            if (s) s.textContent = `Call answered. Synthesizing native speech in ${LANG_NAMES[parsed.language] || parsed.language}…`;
+            const m = ind.querySelector('.dialing-meta');
+            if (m) m.innerHTML = `<span class="pulsing-amber-dot" style="background:#3b82f6;box-shadow:0 0 10px #3b82f6"></span> Preparing opening healthcare check-in…`;
+          }
         } else if (parsed.type === 'turn') {
           enqueueTurn(parsed);
         } else if (parsed.type === 'call_end') {
