@@ -135,8 +135,9 @@ class LogCapture:
 
 sys.stdout = LogCapture(sys.stdout)
 
-# ── Active check-in jobs ──────────────────────────────────────────────────────
+# ── Audio Cache & Active check-in jobs ────────────────────────────────────────
 
+_audio_cache: dict[str, bytes] = {}
 _active_jobs: dict[str, str] = {}   # patient_id -> "running" | "done" | "error"
 
 
@@ -144,7 +145,8 @@ def _run_checkin_thread(patient_id: str):
     """Run an interactive turn-by-turn check-in, streaming both speech turns and reports."""
     _active_jobs[patient_id] = "running"
     try:
-        from companion import conversation, patient_db, escalation, notifier
+        from companion import conversation, patient_db, escalation, notifier, tts
+        from companion.config import VOICE_MAP, PATIENT_VOICE_MAP
         from companion.storage import save_checkin
 
         patient = patient_db.get_patient(patient_id)
@@ -167,22 +169,27 @@ def _run_checkin_thread(patient_id: str):
         turn_num = 0
 
         for item_type, content in conversation.run_turn_by_turn(patient):
-            if item_type == "agent":
+            if item_type in ("agent", "patient"):
                 turn_num += 1
+                role = "agent" if item_type == "agent" else "patient"
+                spk = "AI Clinic Assistant" if role == "agent" else patient["name"]
+
+                # Pre-synthesize TTS audio directly into cache BEFORE broadcasting turn.
+                # This ensures the browser's audio request hits a 0ms memory cache instead of waiting for API.
+                cache_key = f"{role}:{lang}:{content}"
+                if cache_key not in _audio_cache:
+                    try:
+                        speaker = VOICE_MAP.get(lang, "ritu") if role == "agent" else PATIENT_VOICE_MAP.get(lang, "shubh")
+                        audio_data = tts.speak(content, lang, speaker=speaker)
+                        if audio_data:
+                            _audio_cache[cache_key] = audio_data
+                    except Exception as err:
+                        print(f"Pre-warm TTS error: {err}")
+
                 broadcast_event({
                     "type": "turn",
-                    "role": "agent",
-                    "speaker": "AI Clinic Assistant",
-                    "text": content,
-                    "lang": lang,
-                    "turn": turn_num
-                })
-            elif item_type == "patient":
-                turn_num += 1
-                broadcast_event({
-                    "type": "turn",
-                    "role": "patient",
-                    "speaker": patient["name"],
+                    "role": role,
+                    "speaker": spk,
                     "text": content,
                     "lang": lang,
                     "turn": turn_num
@@ -260,8 +267,6 @@ def api_trigger_checkin(patient_id: str):
     t.start()
     return {"status": "started", "patient_id": patient_id}
 
-
-_audio_cache: dict[str, bytes] = {}
 
 @app.get("/api/speak")
 def api_speak(text: str, lang: str = "hi-IN", role: str = "agent"):
@@ -685,6 +690,7 @@ let turnQueue = [];
 let isPlayingTurn = false;
 let audioEnabled = true;
 let audioUnlocked = false;
+let currentPlayingAudio = null;
 
 function toggleAudio() {
   audioEnabled = !audioEnabled;
@@ -694,8 +700,20 @@ function toggleAudio() {
     btn.style.background = audioEnabled ? '#e0e7ff' : '#fee2e2';
     btn.style.color = audioEnabled ? '#4338ca' : '#dc2626';
   }
-  if (audioEnabled && !isPlayingTurn && turnQueue.length) {
-    playNextTurn();
+  if (!audioEnabled) {
+    // Immediately stop and mute any currently playing voice audio
+    if (currentPlayingAudio) {
+      try {
+        currentPlayingAudio.pause();
+        currentPlayingAudio.currentTime = 0;
+      } catch (e) {}
+      currentPlayingAudio = null;
+    }
+  } else {
+    // If unmuted and waiting, resume turn queue
+    if (!isPlayingTurn && turnQueue.length) {
+      playNextTurn();
+    }
   }
 }
 
@@ -709,7 +727,7 @@ function unlockAudio() {
 }
 
 function enqueueTurn(turn) {
-  // Pre-load audio IMMEDIATELY so it is cached in the browser before playback time
+  // Pre-load audio immediately in the browser
   const audioUrl = '/api/speak?role=' + turn.role + '&lang=' + encodeURIComponent(turn.lang) + '&text=' + encodeURIComponent(turn.text);
   const preloaded = new Audio(audioUrl);
   preloaded.preload = "auto";
@@ -737,7 +755,8 @@ function createSpeechBubbleSkeleton(role, speaker, lang, fullText) {
 
   const card = document.createElement('div');
   card.className = 'bubble-card';
-  card.textContent = ''; // starts empty for dynamic word streaming
+  // Subtle initial loading placeholder until voice starts
+  card.innerHTML = '<span class="voice-loading" style="color:#9ca3af;font-size:0.85rem;font-style:italic">🔊 Connecting voice…</span>';
 
   const action = document.createElement('div');
   action.className = 'bubble-action';
@@ -770,7 +789,6 @@ function playNextTurn() {
   isPlayingTurn = true;
   const turn = turnQueue.shift();
 
-  // Create speech bubble in the UI with empty text and cursor
   const bubbleElements = createSpeechBubbleSkeleton(turn.role, turn.speaker, turn.lang, turn.text);
 
   const ind = document.getElementById('audio-playing-indicator');
@@ -780,19 +798,34 @@ function playNextTurn() {
     indText.textContent = (turn.role === 'agent' ? '🤖 Clinic Assistant' : '👤 Patient') + ' is speaking…';
   }
 
-  const audio = turn.audioObj || new Audio('/api/speak?role=' + turn.role + '&lang=' + encodeURIComponent(turn.lang) + '&text=' + encodeURIComponent(turn.text));
-  let audioStarted = false;
+  let turnFinished = false;
   let wordStreamTimer = null;
 
+  function advanceToNextTurn() {
+    if (turnFinished) return;
+    turnFinished = true;
+    if (wordStreamTimer) clearInterval(wordStreamTimer);
+    if (bubbleElements) {
+      if (bubbleElements.card) bubbleElements.card.textContent = turn.text;
+      if (bubbleElements.action) bubbleElements.action.style.display = 'flex';
+    }
+    if (currentPlayingAudio) {
+      currentPlayingAudio = null;
+    }
+    // Natural slight conversational gap before the other party replies
+    setTimeout(playNextTurn, 100);
+  }
+
   function startWordStreaming(durationSec) {
+    if (turnFinished) return;
     const words = turn.text.split(' ');
-    // Estimate cadence based on audio duration or fallback to 220ms per word
-    const totalDurationMs = (durationSec && durationSec > 0.5) ? (durationSec * 1000) : (words.length * 220);
-    const msPerWord = Math.max(90, Math.floor(totalDurationMs / words.length));
+    // Match word streaming speed precisely to audio duration
+    const totalDurationMs = (durationSec && durationSec > 0.4) ? (durationSec * 1000) : (words.length * 220);
+    const msPerWord = Math.max(70, Math.floor(totalDurationMs / words.length));
 
     let wordIdx = 0;
     if (bubbleElements && bubbleElements.card) {
-      bubbleElements.card.textContent = '';
+      bubbleElements.card.textContent = ''; // Clear placeholder hint
       const cursor = document.createElement('span');
       cursor.className = 'typing-cursor';
       cursor.textContent = ' ▌';
@@ -808,81 +841,95 @@ function playNextTurn() {
           clearInterval(wordStreamTimer);
           cursor.remove();
           bubbleElements.card.textContent = turn.text;
+          // If audio was muted mid-turn or stopped, advance cleanly
+          if (!audioEnabled || !currentPlayingAudio) {
+            setTimeout(advanceToNextTurn, 180);
+          }
         }
       }, msPerWord);
     }
   }
 
-  function advanceToNextTurn() {
-    if (wordStreamTimer) clearInterval(wordStreamTimer);
-    if (bubbleElements) {
-      if (bubbleElements.card) bubbleElements.card.textContent = turn.text;
-      if (bubbleElements.action) bubbleElements.action.style.display = 'flex';
-    }
-    // Minimal gap of only 80ms before next speaker starts talking
-    setTimeout(playNextTurn, 80);
-  }
-
   if (audioEnabled) {
-    audio.onloadedmetadata = () => {
-      if (!audioStarted) {
+    const audio = turn.audioObj || new Audio('/api/speak?role=' + turn.role + '&lang=' + encodeURIComponent(turn.lang) + '&text=' + encodeURIComponent(turn.text));
+    currentPlayingAudio = audio;
+    let audioStarted = false;
+
+    // Trigger word streaming ONLY when audio playback has genuinely started producing sound
+    audio.onplaying = () => {
+      if (!audioStarted && audioEnabled) {
         audioStarted = true;
         startWordStreaming(audio.duration);
       }
     };
 
-    audio.onplay = () => {
-      if (!audioStarted) {
-        audioStarted = true;
-        startWordStreaming(audio.duration || (turn.text.split(' ').length * 0.22));
-      }
-    };
-
     audio.onended = () => {
+      if (currentPlayingAudio === audio) currentPlayingAudio = null;
       advanceToNextTurn();
     };
 
     audio.onerror = (e) => {
-      console.warn('Audio playback issue, streaming words visually:', e);
+      console.warn('Audio playback error, streaming words visually:', e);
+      if (currentPlayingAudio === audio) currentPlayingAudio = null;
       if (!audioStarted) {
         audioStarted = true;
         startWordStreaming(turn.text.split(' ').length * 0.22);
       }
-      setTimeout(advanceToNextTurn, (turn.text.split(' ').length * 220) + 100);
     };
 
     audio.play().catch(e => {
-      console.warn('Autoplay prevented, streaming words visually:', e);
+      console.warn('Playback prevented or paused:', e);
+      if (currentPlayingAudio === audio) currentPlayingAudio = null;
       if (!audioStarted) {
         audioStarted = true;
         startWordStreaming(turn.text.split(' ').length * 0.22);
       }
-      setTimeout(advanceToNextTurn, (turn.text.split(' ').length * 220) + 100);
     });
 
-    // Safety fallback: ensure word streaming starts if onloadedmetadata is delayed
+    // Safety timeout: only if audio fails to play after 7 seconds, fallback to visual stream
     setTimeout(() => {
-      if (!audioStarted) {
+      if (!audioStarted && !turnFinished) {
         audioStarted = true;
-        startWordStreaming(audio.duration || (turn.text.split(' ').length * 0.22));
+        startWordStreaming(turn.text.split(' ').length * 0.22);
       }
-    }, 350);
+    }, 7000);
 
   } else {
-    // Muted mode: stream words visually at natural cadence
+    // Muted mode: stream words visually at natural reading cadence
     startWordStreaming(turn.text.split(' ').length * 0.22);
-    setTimeout(advanceToNextTurn, (turn.text.split(' ').length * 220) + 100);
   }
 }
 
 function playSingleTurn(role, lang, text) {
+  if (!audioEnabled) {
+    alert('Audio is currently muted. Please click "Voice Audio: MUTED" in the top bar to unmute first.');
+    return;
+  }
   unlockAudio();
+  if (currentPlayingAudio) {
+    try {
+      currentPlayingAudio.pause();
+      currentPlayingAudio.currentTime = 0;
+    } catch (e) {}
+    currentPlayingAudio = null;
+  }
   const audioUrl = '/api/speak?role=' + role + '&lang=' + encodeURIComponent(lang) + '&text=' + encodeURIComponent(text);
   const audio = new Audio(audioUrl);
+  currentPlayingAudio = audio;
+  audio.onended = () => {
+    if (currentPlayingAudio === audio) currentPlayingAudio = null;
+  };
   audio.play().catch(e => console.warn(e));
 }
 
 function clearLiveCall() {
+  if (currentPlayingAudio) {
+    try {
+      currentPlayingAudio.pause();
+      currentPlayingAudio.currentTime = 0;
+    } catch (e) {}
+    currentPlayingAudio = null;
+  }
   const transcript = document.getElementById('call-transcript');
   if (transcript) {
     transcript.innerHTML = '<div class="empty" id="transcript-empty">Ready for outbound call.<br>Click <strong>📞 Check In</strong> on any patient to start a live voice conversation in their native language!</div>';
@@ -894,6 +941,11 @@ function clearLiveCall() {
   turnQueue = [];
   isPlayingTurn = false;
 }
+
+// Keep Render free-tier container active 24/7 while browser is open
+setInterval(() => {
+  fetch('/health').catch(() => {});
+}, 180000);
 
 // ── History modal ─────────────────────────────────────────────────────────────
 async function showHistory(patientId) {
