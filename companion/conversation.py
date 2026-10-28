@@ -68,28 +68,65 @@ Patient info:
 - Days since discharge: {days_since_discharge}
 """
 
-PATIENT_DEMO_RESPONSES = {
-    "P001": [
-        "नमस्ते, मैं ठीक हूँ।",
-        "हाँ, मैंने सुबह मेटफ़ॉर्मिन ली थी, कोई परेशानी नहीं हुई।",
-        "एमलोडिपिन भी ली, लेकिन कल रात को एक खुराक भूल गया था।",
-        "मुझे थोड़ा सिरदर्द रहता है, बाकी सब ठीक है।",
-        "जी हाँ, मैं 5 नवंबर को अस्पताल ज़रूर आऊंगा। बहुत-बहुत धन्यवाद।",
-    ],
-    "P002": [
-        "வணக்கம், சொல்லுங்க.",
-        "இல்லைங்க, நான் இரண்டு நாட்களாக எந்த மருந்தும் சாப்பிடவில்லை.",
-        "நெஞ்சில் கொஞ்சம் பாரமாகவும், மூச்சு விட சிரமமாகவும் இருக்கு.",
-        "நான் வர முயற்சிக்கிறேன், ஆனால் உடம்பு ரொம்ப பலவீனமாக இருக்கு.",
-        "சரிங்க, நன்றி.",
-    ],
-    "P003": [
-        "હા નમસ્તે, હું સારો છું.",
-        "હા, એસ્પિરિન હું દરરોજ નિયમિત સવારે લઉં છું.",
-        "ના, મને કોઈ નવું દર્દ કે તકલીફ નથી, ખૂબ સારું લાગે છે.",
-        "હા ચોક્કસ, હું 8 નવેમ્બરે એપોઈન્ટમેન્ટ પર આવીશ.",
-        "ખૂબ ખૂબ આભાર.",
-    ],
+PATIENT_CLINICAL_PROFILES = {
+    "P001": {
+        "persona": "Ramesh Kumar, a polite rural Indian gentleman speaking in Hindi.",
+        "facts": (
+            "- General state: Feeling fine / okay.\n"
+            "- Metformin: Took morning Metformin 500mg without any trouble.\n"
+            "- Amlodipine: Took it, but forgot last night's dose.\n"
+            "- Symptoms: Has a mild headache, but no other symptoms.\n"
+            "- Follow-up appointment (5 Nov): Confirms he will definitely attend.\n"
+            "- Additional help / questions: Does not need any transport help, has no questions.\n"
+            "- Farewell: If caller concludes or says goodbye, politely say thank you and goodbye ('जी बहुत धन्यवाद, नमस्ते!')."
+        ),
+        "fallbacks": {
+            "greeting": "नमस्ते, मैं ठीक हूँ।",
+            "medication": "हाँ, मैंने सुबह मेटफ़ॉर्मिन ली थी, लेकिन कल रात एमलोडिपिन भूल गया था।",
+            "symptoms": "मुझे थोड़ा सिरदर्द रहता है, बाकी सब ठीक है।",
+            "appointment": "जी हाँ, मैं 5 नवंबर को अस्पताल ज़रूर आऊंगा। बहुत-बहुत धन्यवाद।",
+            "questions": "नहीं, मुझे किसी मदद या सवाल की ज़रूरत नहीं है, धन्यवाद।",
+            "farewell": "जी बहुत धन्यवाद, नमस्ते!",
+        }
+    },
+    "P002": {
+        "persona": "Lakshmi Devi, an elderly rural patient speaking in Tamil.",
+        "facts": (
+            "- General state: Feeling weak and unwell.\n"
+            "- Medications (Atorvastatin, Losartan): Has NOT taken any medicines for the last two days.\n"
+            "- Symptoms: Chest feels heavy, having difficulty breathing; it is new and getting slightly worse.\n"
+            "- Follow-up appointment (10 Nov): Wants to come, but body is very weak.\n"
+            "- Additional help / questions: Needs help / transport from hospital to travel.\n"
+            "- Farewell: If caller concludes or says goodbye, say thank you ('சரிங்க, ரொம்ப நன்றிங்க!')."
+        ),
+        "fallbacks": {
+            "greeting": "வணக்கம், சொல்லுங்க.",
+            "medication": "இல்லைங்க, நான் இரண்டு நாட்களாக எந்த மருந்தும் சாப்பிடவில்லை.",
+            "symptoms": "நெஞ்சில் கொஞ்சம் பாரமாகவும், மூச்சு விட சிரமமாகவும் இருக்கு.",
+            "appointment": "நான் வர முயற்சிக்கிறேன், ஆனால் உடம்பு ரொம்ப பலவீனமாக இருக்கு.",
+            "questions": "ஆமாங்க, எனக்கு ஆஸ்பத்திரிக்கு போக உதவி தேவைப்படும்.",
+            "farewell": "சரிங்க, ரொம்ப நன்றிங்க!",
+        }
+    },
+    "P003": {
+        "persona": "Suresh Patel, a cheerful rural patient speaking in Gujarati.",
+        "facts": (
+            "- General state: Doing very well.\n"
+            "- Aspirin: Takes Aspirin 75mg regularly every morning without fail.\n"
+            "- Symptoms: No pain, no new symptoms, feeling completely healthy.\n"
+            "- Follow-up appointment (8 Nov): Confirms he will definitely come.\n"
+            "- Additional help / questions: Has no other questions and no difficulties.\n"
+            "- Farewell: If caller concludes or says goodbye, say thank you ('ખૂબ ખૂબ આભાર, આવજો!')."
+        ),
+        "fallbacks": {
+            "greeting": "હા નમસ્તે, હું સારો છું.",
+            "medication": "હા, એસ્પિરિન હું દરરોજ નિયમિત સવારે લઉં છું, કોઈ ડોઝ ચૂક્યો નથી.",
+            "symptoms": "ના, મને કોઈ નવું દર્દ કે તકલીફ નથી, ખૂબ સારું લાગે છે.",
+            "appointment": "હા ચોક્કસ, હું 8 નવેમ્બરે એપોઈન્ટમેન્ટ પર આવીશ.",
+            "questions": "ના, મને કોઈ પ્રશ્ન કે મુશ્કેલી નથી, આભાર.",
+            "farewell": "ખૂબ ખૂબ આભાર, આવજો!",
+        }
+    }
 }
 
 DEFAULT_PATIENT_RESPONSES = [
@@ -99,6 +136,114 @@ DEFAULT_PATIENT_RESPONSES = [
     "I have been feeling a little tired, but otherwise okay.",
     "Yes, I will definitely attend my appointment. Thank you.",
 ]
+
+def is_call_conclusion(text: str) -> bool:
+    """Detect if the agent is bidding farewell or concluding the conversation."""
+    t = (text or "").lower()
+    closing_indicators = [
+        "ख्याल रखिएगा", "ध्यान रखिएगा", "ख्याल रखिए", "ध्यान रखिए", "अलविदा", "स्वस्थ रहें", "प्रणाम",
+        "நல்லா பார்த்துக்கோங்க", "கவனமா இருங்க", "போயிட்டு வரேன்", "உடம்பை பார்த்துக்கோங்க",
+        "સાચવજો", "ધ્યાન રાખજો", "તમારું ધ્યાન",
+        "take care", "goodbye", "have a good day", "have a great day"
+    ]
+    return any(ind in t for ind in closing_indicators)
+
+def get_or_create_patient_profile(patient: dict) -> dict:
+    pid = patient.get("id", "")
+    if pid in PATIENT_CLINICAL_PROFILES:
+        return PATIENT_CLINICAL_PROFILES[pid]
+
+    name = patient.get("name", "Patient")
+    gender = patient.get("gender", "male")
+    lang = patient.get("language", "hi-IN")
+    lang_name = LANGUAGE_NAMES.get(lang, "Hindi")
+    meds = ", ".join(patient.get("medications", []))
+    appt = patient.get("next_appointment", "")
+
+    return {
+        "persona": f"{name}, a {gender} rural patient speaking in {lang_name}.",
+        "facts": (
+            f"- General state: Doing well / okay.\n"
+            f"- Medications ({meds}): Has been taking prescribed medicines regularly.\n"
+            f"- Symptoms: Feeling okay, no severe symptoms.\n"
+            f"- Follow-up appointment ({appt}): Confirms attendance.\n"
+            f"- Farewell: Say thank you and goodbye politely."
+        ),
+        "fallbacks": {
+            "greeting": "Hello, I am doing fine.",
+            "medication": "Yes, I am taking my medicines regularly.",
+            "symptoms": "No new symptoms, feeling fine.",
+            "appointment": f"Yes, I will attend my appointment on {appt}.",
+            "questions": "No questions, thank you.",
+            "farewell": "Thank you very much, goodbye!",
+        }
+    }
+
+def get_fallback_patient_reply(patient: dict, agent_message: str, turn_index: int) -> str:
+    profile = get_or_create_patient_profile(patient)
+    fallbacks = profile.get("fallbacks", {})
+    t = agent_message.lower()
+
+    if is_call_conclusion(t) or "अलविदा" in t:
+        return fallbacks.get("farewell", "जी बहुत धन्यवाद, नमस्ते!")
+    if any(k in t for k in ["सवाल", "प्रश्न", "கேள்வி", "question", "गाड़ी", "वाहन", "मदद", "உதவி"]):
+        return fallbacks.get("questions", "नहीं, मुझे कोई और मदद या सवाल नहीं है, धन्यवाद।")
+    if any(k in t for k in ["अपॉइंटमेंट", "appointment", "तारीख", "तारीખ", "தேதி", "5 नवंबर", "10 nov", "8 nov", "8 નવેમ્બર", "நவம்பர்"]):
+        return fallbacks.get("appointment", fallbacks.get("farewell"))
+    if any(k in t for k in ["लक्षण", "दर्द", "सिरदर्द", "सांस", "நெஞ்சு", "வலி", "તકલીફ", "દર્દ", "symptom"]):
+        return fallbacks.get("symptoms", fallbacks.get("farewell"))
+    if any(k in t for k in ["दवा", "गोली", "खुराक", "मेटफॉर्मिन", "एमलोडिपिन", "மருந்து", "மாத்திரை", "દવા", "ગોળી", "medicine"]):
+        return fallbacks.get("medication", fallbacks.get("greeting"))
+
+    return fallbacks.get("farewell", "जी बहुत धन्यवाद, नमस्ते!")
+
+def generate_patient_reply(patient: dict, agent_message: str, turn_index: int) -> str:
+    """Dynamically generate context-relevant patient reply directly answering agent's query."""
+    profile = get_or_create_patient_profile(patient)
+    lang = patient.get("language", "hi-IN")
+    lang_name = LANGUAGE_NAMES.get(lang, "Hindi")
+
+    # If caller is concluding call or saying goodbye, return quick polite farewell
+    if is_call_conclusion(agent_message):
+        if "hi" in lang:
+            return "जी बहुत धन्यवाद, नमस्ते!"
+        elif "ta" in lang:
+            return "சரிங்க, ரொம்ப நன்றிங்க!"
+        elif "gu" in lang:
+            return "ખૂબ ખૂબ આભાર, આવજો!"
+        return "Thank you so much, goodbye!"
+
+    # Call Sarvam AI for dynamic, highly relevant contextual response
+    try:
+        persona = profile["persona"]
+        facts = profile["facts"]
+        sys_msg = (
+            f"You are {persona}\n"
+            f"Your medical reality:\n{facts}\n\n"
+            f"STRICT RULES:\n"
+            f"- Speak in {lang_name} ONLY.\n"
+            f"- Reply in 1 short, natural spoken sentence directly answering what the clinic caller just asked or said.\n"
+            f"- Answer ONLY the specific question asked. Do NOT volunteer facts about other unasked topics.\n"
+            f"- Never output JSON, markdown, or greetings if already greeted."
+        )
+        resp = _client.chat.completions(
+            model=CHAT_MODEL,
+            messages=[
+                {"role": "system", "content": sys_msg},
+                {"role": "user", "content": f"[Clinic caller asks]: {agent_message}"}
+            ],
+            temperature=0.1,
+            max_tokens=60,
+        )
+        reply = (resp.choices[0].message.content or "").strip()
+        reply = reply.split("\n")[0].strip()
+        reply = re.sub(r'^["\']|["\']$', '', reply)
+        if reply and len(reply) > 2 and not reply.startswith("{"):
+            return reply
+    except Exception as e:
+        print(f"Dynamic patient generation exception (using fallback): {e}")
+
+    return get_fallback_patient_reply(patient, agent_message, turn_index)
 
 def get_gender_instructions(patient: dict) -> tuple[str, str]:
     """Return (salutation, detailed_grammatical_rules) for the patient's gender and language."""
@@ -286,9 +431,6 @@ def run_turn_by_turn(patient: dict, user_inputs: list = None):
       ("patient", spoken_text)
       ("report", report_dict)
     """
-    if user_inputs is None:
-        user_inputs = PATIENT_DEMO_RESPONSES.get(patient["id"], DEFAULT_PATIENT_RESPONSES)
-
     gender = str(patient.get("gender", "male")).strip().lower()
     is_male = (gender == "male")
     title_hint = "Mr. / पुरुष / Gentleman" if is_male else "Mrs./Ms. / महिला / Lady"
@@ -307,8 +449,9 @@ def run_turn_by_turn(patient: dict, user_inputs: list = None):
     ]
 
     report = None
+    max_turns = len(user_inputs) if user_inputs is not None else 6
 
-    for i, user_reply in enumerate(user_inputs):
+    for turn_idx in range(max_turns):
         response = _client.chat.completions(
             model=CHAT_MODEL,
             messages=messages,
@@ -333,12 +476,28 @@ def run_turn_by_turn(patient: dict, user_inputs: list = None):
 
         if extracted:
             report = extracted
+            # If agent bid farewell and report was attached, patient acknowledges goodbye
+            if spoken_agent and is_call_conclusion(spoken_agent):
+                farewell_ack = generate_patient_reply(patient, spoken_agent, turn_idx)
+                yield ("patient", farewell_ack)
             break
 
-        # Patient speaks next
-        if user_reply:
-            yield ("patient", user_reply)
-            messages.append({"role": "user", "content": user_reply})
+        # Check if agent bid farewell without attaching report yet
+        agent_closed = spoken_agent and is_call_conclusion(spoken_agent)
+
+        # Patient speaks next, directly answering what the agent asked
+        if user_inputs is not None and turn_idx < len(user_inputs):
+            patient_reply = user_inputs[turn_idx]
+        else:
+            patient_reply = generate_patient_reply(patient, spoken_agent, turn_idx)
+
+        if patient_reply:
+            yield ("patient", patient_reply)
+            messages.append({"role": "user", "content": patient_reply})
+
+        # If the agent concluded the call, break after patient acknowledged goodbye
+        if agent_closed:
+            break
 
     if not report:
         messages.append({
